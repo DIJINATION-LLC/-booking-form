@@ -1,14 +1,12 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
-import Navigation from "@/components/Navigation";
-import ToastProvider from '@/components/ToastProvider';
+import './globals.css';
+import { Toaster } from 'react-hot-toast';
+import { Inter } from 'next/font/google';
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ['latin'] });
 
-export const metadata: Metadata = {
-  title: "TexasMed Healthcare Solutions",
-  description: "Affordable Furnished Medical Office Space for Rent in McKinney, Texas",
+export const metadata = {
+  title: 'Texas Medical Clinic Booking',
+  description: 'Book medical clinic rooms for your practice',
 };
 
 export default function RootLayout({
@@ -19,9 +17,18 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Navigation />
-        {children}
-        <ToastProvider />
+        <Toaster
+          position="top-center"
+          reverseOrder={false}
+          toastOptions={{
+            duration: 3000,
+            style: {
+              background: '#363636',
+              color: '#fff',
+            },
+          }}
+        />
+        <main>{children}</main>
       </body>
     </html>
   );

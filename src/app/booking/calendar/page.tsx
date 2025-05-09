@@ -4,8 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
-
-type TimeSlot = 'full' | 'morning' | 'evening';
+import { PRICING, TimeSlot, BookingType } from '@/constants/pricing';
 
 interface RoomBooking {
     id: number;
@@ -144,9 +143,18 @@ const CalendarPage: React.FC = () => {
     };
 
     const handleDateSelection = (date: Date, roomId: number) => {
-        // Check if the date is already booked for this room
-        if (isDateBooked(date, roomId, 'full')) {
-            toast.error('This date is already booked for this room');
+        const dateStr = date.toISOString().split('T')[0];
+        const room = selectedRooms.find(r => r.id === roomId);
+
+        if (!room) return;
+
+        // Check if the slot is available
+        if (!isTimeSlotAvailable(date, roomId, room.timeSlot)) {
+            if (room.timeSlot === 'full') {
+                toast.error('This date is not available for full day booking');
+            } else {
+                toast.error(`This ${room.timeSlot} slot is already booked`);
+            }
             return;
         }
 
@@ -162,8 +170,8 @@ const CalendarPage: React.FC = () => {
                 const day = currentDate.getDay();
                 const dateStr = currentDate.toISOString().split('T')[0];
 
-                // Only add if it's Monday–Friday and not booked for this room
-                if (day >= 1 && day <= 5 && !isDateBooked(currentDate, roomId, 'full')) {
+                // Only add if it's Monday–Friday and the slot is available
+                if (day >= 1 && day <= 5 && isTimeSlotAvailable(currentDate, roomId, room.timeSlot)) {
                     dates.push(dateStr);
                 }
 
@@ -171,52 +179,49 @@ const CalendarPage: React.FC = () => {
             }
 
             if (dates.length > 0) {
-                toast.success(`Selected ${dates.length} available weekdays from ${startDate.toDateString()} to ${endDate.toDateString()}`);
+                setSelectedRooms(prev =>
+                    prev.map(r =>
+                        r.id === roomId ? { ...r, dates } : r
+                    )
+                );
+                toast.success(`Selected ${dates.length} available weekdays`);
             } else {
                 toast.error('No available weekdays found within one month range');
+                return;
             }
-
-            setSelectedRooms((prev) => {
-                const updatedRooms = prev.map(room =>
-                    room.id === roomId ? { ...room, dates } : room
-                );
-
-                localStorage.setItem('selectedRooms', JSON.stringify(updatedRooms));
-                localStorage.setItem('bookingType', bookingType);
-                return updatedRooms;
-            });
         } else {
-            // Daily booking logic
-            const dateStr = date.toISOString().split('T')[0];
-
-            setSelectedRooms((prev) => {
-                const updatedRooms = prev.map(room => {
-                    if (room.id === roomId) {
-                        const dateIndex = room.dates?.indexOf(dateStr) ?? -1;
-                        let newDates = room.dates || [];
+            // Daily booking
+            setSelectedRooms(prev =>
+                prev.map(r => {
+                    if (r.id === roomId) {
+                        const dateIndex = r.dates?.indexOf(dateStr) ?? -1;
+                        let newDates = r.dates || [];
 
                         if (dateIndex === -1) {
-                            // Check if the date is already booked before adding
-                            if (!isDateBooked(date, roomId, 'full')) {
+                            // Adding new date
+                            if (isTimeSlotAvailable(date, roomId, r.timeSlot)) {
                                 newDates = [...newDates, dateStr];
+                                toast.success(`Selected ${r.timeSlot} slot for ${new Date(dateStr).toLocaleDateString()}`);
                             } else {
-                                toast.error('This date is already booked for this room');
-                                return room;
+                                toast.error(`${r.timeSlot} slot is not available for this date`);
+                                return r;
                             }
                         } else {
+                            // Removing date
                             newDates = newDates.filter(d => d !== dateStr);
+                            toast.success(`Removed ${r.timeSlot} slot for ${new Date(dateStr).toLocaleDateString()}`);
                         }
 
-                        return { ...room, dates: newDates };
+                        return { ...r, dates: newDates };
                     }
-                    return room;
-                });
-
-                localStorage.setItem('selectedRooms', JSON.stringify(updatedRooms));
-                localStorage.setItem('bookingType', bookingType);
-                return updatedRooms;
-            });
+                    return r;
+                })
+            );
         }
+
+        // Save to localStorage
+        localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
+        localStorage.setItem('bookingType', bookingType);
     };
 
     const handleTimeSlotChange = (roomId: number, timeSlot: TimeSlot) => {
@@ -234,24 +239,32 @@ const CalendarPage: React.FC = () => {
         localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
     };
 
-    const isTimeSlotAvailable = (roomId: number, date: Date, timeSlot: TimeSlot): boolean => {
+    const isTimeSlotAvailable = (date: Date, roomId: number, timeSlot: TimeSlot): boolean => {
         const dateStr = date.toISOString().split('T')[0];
         const status = bookingStatus.find(b =>
             b.date === dateStr &&
             b.roomId === roomId.toString()
         );
 
-        if (!status) return true; // No bookings, all slots available
+        // If no booking status found, all slots are available
+        if (!status) return true;
 
-        if (status.timeSlots.includes('full')) return false; // Full day booked, no slots available
+        // If full day is booked, no slots are available
+        if (status.timeSlots.includes('full')) return false;
 
-        if (timeSlot === 'full') {
-            // Can't book full day if any slot is taken
-            return !status.timeSlots.includes('morning') && !status.timeSlots.includes('evening');
+        switch (timeSlot) {
+            case 'full':
+                // For full day booking, both morning and evening must be free
+                return !status.timeSlots.includes('morning') && !status.timeSlots.includes('evening');
+            case 'morning':
+                // For morning booking, only morning slot must be free
+                return !status.timeSlots.includes('morning');
+            case 'evening':
+                // For evening booking, only evening slot must be free
+                return !status.timeSlots.includes('evening');
+            default:
+                return false;
         }
-
-        // For half-day bookings, check specific slot
-        return !status.timeSlots.includes(timeSlot);
     };
 
     const getTimeSlotText = (slot: TimeSlot): string => {
@@ -274,9 +287,7 @@ const CalendarPage: React.FC = () => {
             const numberOfDays = room.dates?.length || 0;
             if (numberOfDays === 0) return; // Skip rooms with no dates selected
 
-            const basePrice = bookingType === 'daily'
-                ? (room.timeSlot === 'full' ? 300 : 160)
-                : (room.timeSlot === 'full' ? 2000 : 1200);
+            const basePrice = PRICING[bookingType][room.timeSlot];
 
             // Add to subtotal based on booking type
             if (bookingType === 'daily') {
@@ -284,13 +295,15 @@ const CalendarPage: React.FC = () => {
             } else {
                 subtotal += basePrice; // Monthly price is flat rate
             }
-
-            // Add security deposit for each room that has dates selected
-            securityDeposit += 250;
         });
 
+        // Add security deposit only once if there are any rooms with dates
+        if (selectedRooms.some(room => (room.dates?.length || 0) > 0)) {
+            securityDeposit = PRICING.securityDeposit;
+        }
+
         // Calculate tax
-        const tax = subtotal * 0.035;
+        const tax = subtotal * PRICING.taxRate;
 
         // Return all price components
         return {
@@ -385,67 +398,60 @@ const CalendarPage: React.FC = () => {
 
         // Handle different booking states
         if (status) {
+            if (status.timeSlots.includes('full')) {
+                return 'bg-red-100 text-red-600 cursor-not-allowed';
+            }
+
             const hasMorning = status.timeSlots.includes('morning');
             const hasEvening = status.timeSlots.includes('evening');
-            const hasFull = status.timeSlots.includes('full');
-
-            // If full day is booked, all slots are unavailable
-            if (hasFull) {
-                return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
-            }
-
-            // For full day booking view
-            if (room.timeSlot === 'full') {
-                // If either morning or evening is booked, full day is not available
-                if (hasMorning || hasEvening) {
-                    return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
-                }
-            }
 
             // For morning slot booking
             if (room.timeSlot === 'morning') {
                 if (hasMorning) {
-                    // Morning is booked
-                    return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
+                    return 'bg-red-100 text-red-600 cursor-not-allowed';
                 }
-                if (hasEvening) {
-                    // Evening is booked but morning is available
-                    if (isSelected) {
-                        return 'bg-gradient-to-b from-blue-500 from-50% to-red-100 to-50% text-gray-900';
-                    }
-                    return 'bg-gradient-to-b from-white from-50% to-red-100 to-50% cursor-pointer hover:from-blue-50';
+                if (isSelected) {
+                    return 'bg-gradient-to-b from-blue-500 to-transparent cursor-pointer';
                 }
+                return 'bg-white hover:bg-gradient-to-b hover:from-blue-100 hover:to-transparent cursor-pointer';
             }
 
             // For evening slot booking
             if (room.timeSlot === 'evening') {
                 if (hasEvening) {
-                    // Evening is booked
-                    return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
+                    return 'bg-red-100 text-red-600 cursor-not-allowed';
                 }
-                if (hasMorning) {
-                    // Morning is booked but evening is available
-                    if (isSelected) {
-                        return 'bg-gradient-to-b from-red-100 from-50% to-blue-500 to-50% text-gray-900';
-                    }
-                    return 'bg-gradient-to-b from-red-100 from-50% to-white to-50% cursor-pointer hover:to-blue-50';
+                if (isSelected) {
+                    return 'bg-gradient-to-t from-blue-500 to-transparent cursor-pointer';
                 }
+                return 'bg-white hover:bg-gradient-to-t hover:from-blue-100 hover:to-transparent cursor-pointer';
+            }
+
+            // For full day booking
+            if (room.timeSlot === 'full') {
+                if (hasMorning || hasEvening) {
+                    return 'bg-red-100 text-red-600 cursor-not-allowed';
+                }
+                if (isSelected) {
+                    return 'bg-blue-500 text-white cursor-pointer';
+                }
+                return 'bg-white hover:bg-blue-50 cursor-pointer';
             }
         }
 
-        // Handle selected states with proper gradients
+        // Handle selected states
         if (isSelected) {
             if (room.timeSlot === 'morning') {
-                return 'bg-gradient-to-b from-blue-500 from-50% to-transparent to-50% text-gray-900';
+                return 'bg-gradient-to-b from-blue-500 to-transparent cursor-pointer';
             } else if (room.timeSlot === 'evening') {
-                return 'bg-gradient-to-b from-transparent from-50% to-blue-500 to-50% text-gray-900';
+                return 'bg-gradient-to-t from-blue-500 to-transparent cursor-pointer';
             } else {
-                return 'bg-blue-500 text-white hover:bg-blue-600';
+                return 'bg-blue-500 text-white cursor-pointer';
             }
         }
 
         // Default available state
-        return 'bg-white hover:bg-blue-50 cursor-pointer text-gray-900';
+        return 'bg-white hover:bg-blue-50 cursor-pointer';
     };
 
     const handleProceed = async () => {
@@ -521,7 +527,7 @@ const CalendarPage: React.FC = () => {
                         <h3 className="font-semibold text-xl mb-2">Full Day</h3>
                         <p className="text-gray-600">8:00 AM - 5:00 PM</p>
                         <div className="text-blue-600 font-bold mt-2">
-                            ${bookingType === 'daily' ? '300/day' : '2000/month'}
+                            ${PRICING[bookingType].full}/{bookingType === 'daily' ? 'day' : 'month'}
                         </div>
                         {hasPartialBooking && (
                             <p className="text-xs text-red-500 mt-2">Not available with half-day bookings</p>
@@ -544,7 +550,7 @@ const CalendarPage: React.FC = () => {
                         <h3 className="font-semibold text-xl mb-2">Half Day</h3>
                         <p className="text-gray-600">Morning or Evening</p>
                         <div className="text-blue-600 font-bold mt-2">
-                            ${bookingType === 'daily' ? '160/day' : '1200/month'}
+                            ${PRICING[bookingType].morning}/{bookingType === 'daily' ? 'day' : 'month'}
                         </div>
                     </div>
                 </button>
@@ -811,9 +817,7 @@ const CalendarPage: React.FC = () => {
                                                                 {room.timeSlot === 'full' ? 'Full Day' : room.timeSlot === 'morning' ? 'Morning' : 'Evening'}
                                                             </div>
                                                             <div className="text-sm text-blue-600">
-                                                                ${bookingType === 'daily' ?
-                                                                    (room.timeSlot === 'full' ? '300' : '160') + '/day' :
-                                                                    (room.timeSlot === 'full' ? '2000' : '1200') + '/month'}
+                                                                ${PRICING[bookingType][room.timeSlot]}/{bookingType === 'daily' ? 'day' : 'month'}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -857,9 +861,7 @@ const CalendarPage: React.FC = () => {
                                     <div className="space-y-3">
                                         <div className="flex justify-between items-center text-sm text-gray-600">
                                             <span>Price per room:</span>
-                                            <span>${bookingType === 'daily' ?
-                                                (selectedRooms[0]?.timeSlot === 'full' ? '300' : '160') + '/day' :
-                                                (selectedRooms[0]?.timeSlot === 'full' ? '2000' : '1200') + '/month'}</span>
+                                            <span>${PRICING[bookingType][selectedRooms[0]?.timeSlot || 'full']}/{bookingType === 'daily' ? 'day' : 'month'}</span>
                                         </div>
                                         <div className="flex justify-between items-center text-sm text-gray-600">
                                             <span>Number of rooms with dates:</span>
@@ -882,7 +884,7 @@ const CalendarPage: React.FC = () => {
                                         <div className="flex justify-between items-center text-sm text-gray-600">
                                             <div>
                                                 <span>Security Deposit</span>
-                                                <div className="text-xs text-gray-500">($250 per room with dates, refundable)</div>
+                                                <div className="text-xs text-gray-500">($250 one-time, refundable)</div>
                                             </div>
                                             <span>+ ${calculatePrice().securityDeposit.toFixed(2)}</span>
                                         </div>

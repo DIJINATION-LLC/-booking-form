@@ -3,10 +3,11 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import { PRICING, TimeSlot, BookingType } from '@/constants/pricing';
 
 interface Room {
     id: number;
-    timeSlot: 'full' | 'morning' | 'evening';
+    timeSlot: TimeSlot;
     dates: string[];
 }
 
@@ -27,7 +28,7 @@ interface CardDetails {
 const SummaryPage = () => {
     const router = useRouter();
     const [selectedRooms, setSelectedRooms] = useState<Room[]>([]);
-    const [bookingType, setBookingType] = useState<'daily' | 'monthly'>('daily');
+    const [bookingType, setBookingType] = useState<BookingType>('daily');
     const [isProcessing, setIsProcessing] = useState(false);
     const [priceBreakdown, setPriceBreakdown] = useState<PriceBreakdown>({
         subtotal: 0,
@@ -71,7 +72,7 @@ const SummaryPage = () => {
         }
     }, [router]);
 
-    const calculatePriceBreakdown = (rooms: Room[], type: 'daily' | 'monthly') => {
+    const calculatePriceBreakdown = (rooms: Room[], type: BookingType) => {
         let subtotal = 0;
         let securityDeposit = 0;
 
@@ -79,20 +80,21 @@ const SummaryPage = () => {
             const numberOfDays = room.dates.length;
             if (numberOfDays === 0) return;
 
-            const basePrice = type === 'daily'
-                ? (room.timeSlot === 'full' ? 300 : 160)
-                : (room.timeSlot === 'full' ? 2000 : 1200);
+            const basePrice = PRICING[type][room.timeSlot];
 
             if (type === 'daily') {
                 subtotal += basePrice * numberOfDays;
             } else {
                 subtotal += basePrice;
             }
-
-            securityDeposit += 250;
         });
 
-        const tax = subtotal * 0.035;
+        // Add security deposit only once if there are any rooms with dates
+        if (rooms.some(room => room.dates.length > 0)) {
+            securityDeposit = PRICING.securityDeposit;
+        }
+
+        const tax = subtotal * PRICING.taxRate;
         const total = subtotal + tax + securityDeposit;
 
         setPriceBreakdown({
@@ -249,7 +251,7 @@ const SummaryPage = () => {
             <div className="container mx-auto px-4">
                 <div className="max-w-3xl mx-auto">
                     <button
-                        onClick={() => router.back()}
+                        onClick={() => router.push('/booking/calendar')}
                         className="mb-6 flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -318,10 +320,10 @@ const SummaryPage = () => {
                                     <span>Tax (3.5%)</span>
                                     <span>${priceBreakdown.tax.toFixed(2)}</span>
                                 </div>
-                                <div className="flex justify-between text-gray-600">
+                                <div className="flex justify-between items-center text-sm text-gray-600">
                                     <div>
                                         <span>Security Deposit</span>
-                                        <div className="text-xs text-gray-500">($250 per room, refundable)</div>
+                                        <div className="text-xs text-gray-500">($250 one-time, refundable)</div>
                                     </div>
                                     <span>${priceBreakdown.securityDeposit.toFixed(2)}</span>
                                 </div>

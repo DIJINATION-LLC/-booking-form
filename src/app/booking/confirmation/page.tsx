@@ -177,41 +177,41 @@ const ConfirmationPage = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
             <Header />
-            <div className="container mx-auto px-4 pt-20">
+            <div className="container mx-auto px-4 pt-36 pb-20">
                 <div className="max-w-3xl mx-auto">
-                    <div className="bg-white rounded-2xl shadow-xl p-8">
-                        <div className="text-center mb-8">
-                            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="bg-white rounded-2xl shadow-xl p-8 md:p-12">
+                        <div className="text-center mb-12">
+                            <div className="w-28 h-28 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-8 shadow-lg transform hover:scale-105 transition-transform duration-200">
+                                <svg className="w-14 h-14 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                 </svg>
                             </div>
-                            <h1 className="text-3xl font-bold text-gray-800 mb-2">Booking Confirmed!</h1>
-                            <p className="text-gray-600">Your booking has been successfully completed</p>
-                            <p className="text-sm text-gray-500 mt-1">Booking Date: {formatDate(bookingDetails.bookingDate)}</p>
+                            <h1 className="text-4xl font-bold text-gray-800 mb-3">Booking Confirmed!</h1>
+                            <p className="text-lg text-gray-600 mb-1">Your booking has been successfully completed</p>
+                            <p className="text-sm text-gray-500 mt-2">Booking Date: {formatDate(bookingDetails.bookingDate)}</p>
                         </div>
 
-                        <div className="mb-8">
-                            <h2 className="text-xl font-semibold border-b border-gray-200 pb-2">Booking Details</h2>
+                        <div className="mb-10">
+                            <h2 className="text-2xl font-semibold border-b border-gray-200 pb-3 mb-6">Booking Details</h2>
                             {bookingDetails.rooms.map((room) => (
-                                <div key={room.id} className="bg-gray-50 rounded-xl p-6 mt-4">
-                                    <h3 className="font-semibold text-lg mb-4">{room.name}</h3>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <span className="text-gray-600 text-sm">Time Slot:</span>
-                                            <p className="font-medium">{getTimeSlotText(room.timeSlot)}</p>
+                                <div key={room.id} className="bg-gray-50 rounded-xl p-6 md:p-8 mt-4 hover:shadow-md transition-shadow duration-200">
+                                    <h3 className="text-xl font-semibold mb-4 text-gray-800">{room.name}</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                                            <span className="text-gray-600 text-sm block mb-1">Time Slot:</span>
+                                            <p className="font-medium text-gray-800">{getTimeSlotText(room.timeSlot)}</p>
                                         </div>
-                                        <div>
-                                            <span className="text-gray-600 text-sm">Booking Type:</span>
-                                            <p className="font-medium capitalize">{bookingDetails.bookingType}</p>
+                                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                                            <span className="text-gray-600 text-sm block mb-1">Booking Type:</span>
+                                            <p className="font-medium text-gray-800 capitalize">{bookingDetails.bookingType}</p>
                                         </div>
                                     </div>
-                                    <div className="mt-4">
-                                        <span className="text-gray-600 text-sm">Selected Dates:</span>
-                                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <div className="mt-6">
+                                        <span className="text-gray-600 text-sm block mb-3">Selected Dates:</span>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                             {room.dates.map((date) => (
-                                                <div key={date} className="bg-white p-2 rounded border border-gray-200">
-                                                    <span className="text-sm">{formatDate(date)}</span>
+                                                <div key={date} className="bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                                                    <span className="text-gray-800">{formatDate(date)}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -220,12 +220,12 @@ const ConfirmationPage = () => {
                             ))}
                         </div>
 
-                        <div className="border-t border-gray-200 pt-6 mb-8">
-                            <h2 className="text-xl font-semibold mb-4">Payment Summary</h2>
-                            <div className="bg-blue-50 p-4 rounded-lg">
+                        <div className="border-t border-gray-200 pt-8 mb-10">
+                            <h2 className="text-2xl font-semibold mb-6">Payment Summary</h2>
+                            <div className="bg-blue-50 p-6 rounded-xl shadow-inner">
                                 <div className="flex justify-between items-center">
-                                    <span className="font-medium">Total Amount Paid:</span>
-                                    <span className="text-xl font-bold text-blue-600">${bookingDetails.totalAmount.toFixed(2)}</span>
+                                    <span className="text-lg font-medium text-gray-700">Total Amount Paid:</span>
+                                    <span className="text-2xl font-bold text-blue-600">${bookingDetails.totalAmount.toFixed(2)}</span>
                                 </div>
                             </div>
                         </div>
@@ -234,17 +234,17 @@ const ConfirmationPage = () => {
                             <button
                                 onClick={handleDownload}
                                 disabled={isDownloading}
-                                className={`inline-flex items-center justify-center px-6 py-3 rounded-lg text-white ${isDownloading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                                    } transition-colors duration-200`}
+                                className={`inline-flex items-center justify-center px-8 py-4 rounded-xl text-white text-lg font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 ${isDownloading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                                    }`}
                             >
                                 {isDownloading ? (
                                     <>
-                                        <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
+                                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white mr-3"></div>
                                         Downloading...
                                     </>
                                 ) : (
                                     <>
-                                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                         </svg>
                                         Download Confirmation
@@ -253,7 +253,7 @@ const ConfirmationPage = () => {
                             </button>
                             <button
                                 onClick={() => router.push('/')}
-                                className="inline-flex items-center justify-center px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200"
+                                className="inline-flex items-center justify-center px-8 py-4 bg-gray-100 text-gray-700 rounded-xl text-lg font-medium hover:bg-gray-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all duration-200"
                             >
                                 Back to Main Page
                             </button>

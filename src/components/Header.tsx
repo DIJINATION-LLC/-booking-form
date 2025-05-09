@@ -37,36 +37,37 @@ const Header: React.FC = () => {
 
     return (
         <header className="bg-white shadow-sm fixed w-full z-50">
-            <div className="max-w-7xl mx-auto px-4 h-16">
+            <div className="max-w-7xl mx-auto px-4 h-24">
                 <div className="flex justify-between items-center h-full">
                     {/* Logo */}
                     <div
                         className="flex items-center cursor-pointer"
                         onClick={() => router.push('/portal')}
                     >
-                        <div className="w-10 h-10 relative mr-2">
+                        <div className="w-20 h-20 relative mr-4">
                             <Image
                                 src="/logo.png"
                                 alt="Logo"
                                 fill
                                 className="object-contain"
+                                priority
                             />
                         </div>
-                        <span className="text-xl font-semibold text-blue-600">Hire a Clinic</span>
+                        <span className="text-2xl font-semibold text-blue-600">Hire a Clinic</span>
                     </div>
 
                     {/* Profile Menu */}
                     <div className="relative">
                         <button
                             onClick={() => setShowProfileMenu(!showProfileMenu)}
-                            className="flex items-center space-x-2 hover:bg-gray-50 rounded-full p-1.5 transition-colors duration-200"
+                            className="flex items-center space-x-3 hover:bg-gray-50 rounded-full p-2 transition-colors duration-200"
                         >
-                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                <span className="text-blue-600 font-medium">
+                            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                                <span className="text-blue-600 font-medium text-lg">
                                     {userData?.firstName?.[0]}{userData?.lastName?.[0]}
                                 </span>
                             </div>
-                            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                             </svg>
                         </button>

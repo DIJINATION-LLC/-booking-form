@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import { useSession } from 'next-auth/react';
 
 type TimeSlot = 'full' | 'morning' | 'evening';
 
@@ -26,6 +27,7 @@ interface UserData {
     profileImage?: string;
     firstName: string;
     lastName: string;
+    hasBookings: boolean;
 }
 
 interface StoredRoomBooking extends Omit<RoomBooking, 'dates'> {
@@ -34,6 +36,7 @@ interface StoredRoomBooking extends Omit<RoomBooking, 'dates'> {
 
 const CalendarPage: React.FC = () => {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [bookingType, setBookingType] = useState<'daily' | 'monthly'>('daily');
     const [showTimeSlots, setShowTimeSlots] = useState(false);
@@ -44,6 +47,13 @@ const CalendarPage: React.FC = () => {
     const [showHalfDayOptions, setShowHalfDayOptions] = useState(false);
 
     useEffect(() => {
+        // Check authentication status
+        if (status === 'unauthenticated') {
+            toast.error('Please login to continue');
+            router.push('/');
+            return;
+        }
+
         // Fetch user data from localStorage
         const user = localStorage.getItem('user');
         if (user) {
@@ -63,7 +73,7 @@ const CalendarPage: React.FC = () => {
         }
 
         fetchBookingStatus();
-    }, []);
+    }, [status, router]);
 
     const handleLogout = () => {
         localStorage.removeItem('user');
@@ -312,7 +322,13 @@ const CalendarPage: React.FC = () => {
         return status ? status.type === 'booked' : false;
     };
 
-    const handleProceed = () => {
+    const handleProceed = async () => {
+        if (!session) {
+            toast.error('Please login to continue');
+            router.push('/');
+            return;
+        }
+
         if (selectedRooms.length === 0) {
             toast.error('Please select at least one room');
             return;
@@ -322,13 +338,51 @@ const CalendarPage: React.FC = () => {
             return;
         }
 
-        // Save to localStorage before proceeding
-        localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
-        localStorage.setItem('bookingType', bookingType);
+        try {
+            // Prepare booking data
+            const bookingData = {
+                rooms: selectedRooms.map(room => room.id),
+                dates: selectedRooms.flatMap(room => room.dates || []),
+                timeSlot: selectedRooms[0].timeSlot,
+                bookingType,
+                totalAmount: calculatePrice().total,
+                isNewUser: !userData?.hasBookings
+            };
 
-        toast.success('Proceeding to booking summary...');
-        router.push('/booking/summary');
+            // Submit booking to server
+            const response = await fetch('/api/bookings/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(bookingData),
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to create booking');
+            }
+
+            // Clear selected rooms from localStorage
+            localStorage.removeItem('selectedRooms');
+            localStorage.removeItem('bookingType');
+
+            toast.success('Booking created successfully!');
+            router.push('/booking/confirmation');
+        } catch (error) {
+            console.error('Failed to create booking:', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to create booking');
+        }
     };
+
+    // Show loading state while checking authentication
+    if (status === 'loading') {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-12">
@@ -418,7 +472,11 @@ const CalendarPage: React.FC = () => {
                                         </button>
 
                                         <button
-                                            onClick={() => setShowHalfDayOptions(true)}
+                                            onClick={() => {
+                                                setShowHalfDayOptions(true);
+                                                // Set default half-day option to morning when clicking half-day
+                                                handleTimeSlotChange(room.id, 'morning');
+                                            }}
                                             className={`p-6 rounded-xl border-2 transition-all duration-300 ${room.timeSlot !== 'full'
                                                 ? 'border-blue-500 bg-blue-50 shadow-lg'
                                                 : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
@@ -575,23 +633,25 @@ const CalendarPage: React.FC = () => {
                                                                     month: 'short',
                                                                     day: 'numeric'
                                                                 })}</span>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        setSelectedRooms(prev =>
-                                                                            prev.map(r =>
-                                                                                r.id === room.id
-                                                                                    ? { ...r, dates: (r.dates || []).filter(d => d !== date) }
-                                                                                    : r
-                                                                            ).filter(r => r.dates && r.dates.length > 0)
-                                                                        );
-                                                                        toast.success('Date removed');
-                                                                    }}
-                                                                    className="text-red-500 hover:text-red-700 p-1"
-                                                                >
-                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                                    </svg>
-                                                                </button>
+                                                                {bookingType === 'daily' && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setSelectedRooms(prev =>
+                                                                                prev.map(r =>
+                                                                                    r.id === room.id
+                                                                                        ? { ...r, dates: (r.dates || []).filter(d => d !== date) }
+                                                                                        : r
+                                                                                ).filter(r => r.dates && r.dates.length > 0)
+                                                                            );
+                                                                            toast.success('Date removed');
+                                                                        }}
+                                                                        className="text-red-500 hover:text-red-700 p-1"
+                                                                    >
+                                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                                        </svg>
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         ))}
                                                     </div>

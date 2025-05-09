@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-import dbConnect from '@/lib/db';
-import Booking from '@/models/Booking';
+import { connectToDatabase } from '@/lib/mongodb';
 
 export async function POST(req: Request) {
     try {
-        await dbConnect();
+        const { db } = await connectToDatabase();
         const { month, year } = await req.json();
 
         // Get start and end dates for the month
@@ -12,24 +11,30 @@ export async function POST(req: Request) {
         const endDate = new Date(year, month, 0);
 
         // Find all bookings for the month
-        const bookings = await Booking.find({
+        const bookings = await db.collection('bookings').find({
             date: {
                 $gte: startDate,
                 $lte: endDate
             }
-        });
+        }).toArray();
 
         // Create a map of dates and their booking status
         const bookingMap = new Map();
         bookings.forEach(booking => {
             const dateStr = booking.date.toISOString().split('T')[0];
-            if (booking.timeSlot === 'full') {
+            const currentStatus = bookingMap.get(dateStr);
+
+            if (!currentStatus) {
+                bookingMap.set(dateStr, booking.timeSlot === 'full' ? 'booked' : 'partial');
+            } else if (currentStatus === 'partial' && booking.timeSlot === 'full') {
                 bookingMap.set(dateStr, 'booked');
-            } else {
-                const currentStatus = bookingMap.get(dateStr);
-                if (!currentStatus) {
-                    bookingMap.set(dateStr, 'partial');
-                } else if (currentStatus === 'partial') {
+            } else if (currentStatus === 'partial') {
+                // If we have two partial bookings (morning and evening), mark as booked
+                const existingBooking = bookings.find(b =>
+                    b.date.toISOString().split('T')[0] === dateStr &&
+                    b.timeSlot !== booking.timeSlot
+                );
+                if (existingBooking) {
                     bookingMap.set(dateStr, 'booked');
                 }
             }
@@ -42,7 +47,7 @@ export async function POST(req: Request) {
     } catch (error) {
         console.error('Error fetching booking status:', error);
         return NextResponse.json(
-            { message: 'Error fetching booking status' },
+            { error: 'Error fetching booking status' },
             { status: 500 }
         );
     }

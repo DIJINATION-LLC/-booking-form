@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import { useSession } from 'next-auth/react';
 
 type TimeSlot = 'full' | 'morning' | 'evening';
 
@@ -17,6 +18,7 @@ interface Room {
 
 const BookingOptions = () => {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [selectedOption, setSelectedOption] = useState<'daily' | 'monthly'>('daily');
     const [rooms, setRooms] = useState<Room[]>([
         {
@@ -44,6 +46,13 @@ const BookingOptions = () => {
             timeSlot: 'full'
         }
     ]);
+
+    useEffect(() => {
+        if (status === 'unauthenticated') {
+            toast.error('Please login to continue');
+            router.push('/');
+        }
+    }, [status, router]);
 
     const handleRoomSelect = (roomId: number) => {
         setRooms(rooms.map(room => {
@@ -76,6 +85,12 @@ const BookingOptions = () => {
     };
 
     const handleContinue = () => {
+        if (!session) {
+            toast.error('Please login to continue');
+            router.push('/');
+            return;
+        }
+
         const selectedRooms = rooms.filter(r => r.selected);
         if (selectedRooms.length === 0) {
             toast.error('Please select at least one room');
@@ -97,6 +112,15 @@ const BookingOptions = () => {
     const handleBack = () => {
         router.back();
     };
+
+    // Show loading state while checking authentication
+    if (status === 'loading') {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-12">

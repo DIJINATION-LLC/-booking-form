@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/Header';
+import jsPDF from 'jspdf';
 
 interface BookingDetails {
     rooms: Array<{
@@ -64,35 +65,72 @@ const ConfirmationPage = () => {
         }
     };
 
-    const generateBookingSummary = (booking: BookingDetails): string => {
-        const lines = [
-            '=== HIRE A CLINIC - BOOKING CONFIRMATION ===',
-            '',
-            `Booking Date: ${new Date(booking.bookingDate).toLocaleString()}`,
-            `Booking Type: ${booking.bookingType.charAt(0).toUpperCase() + booking.bookingType.slice(1)}`,
-            '',
-            '=== ROOM DETAILS ===',
-            ''
-        ];
+    const generatePDF = (booking: BookingDetails): jsPDF => {
+        const pdf = new jsPDF();
+        let yPos = 20;
+        const lineHeight = 7;
+        const margin = 20;
+        const pageWidth = pdf.internal.pageSize.width;
+
+        // Helper function to add centered text
+        const addCenteredText = (text: string, y: number, size = 12) => {
+            pdf.setFontSize(size);
+            const textWidth = pdf.getTextWidth(text);
+            const xPos = (pageWidth - textWidth) / 2;
+            pdf.text(text, xPos, y);
+            return y + lineHeight;
+        };
+
+        // Helper function to add left-aligned text
+        const addText = (text: string, y: number, size = 12) => {
+            pdf.setFontSize(size);
+            pdf.text(text, margin, y);
+            return y + lineHeight;
+        };
+
+        // Title
+        pdf.setFont("helvetica", "bold");
+        yPos = addCenteredText('HIRE A CLINIC - BOOKING CONFIRMATION', yPos, 16);
+        pdf.setFont("helvetica", "normal");
+
+        yPos += lineHeight;
+
+        // Booking Info
+        yPos = addText(`Booking Date: ${new Date(booking.bookingDate).toLocaleString()}`, yPos);
+        yPos = addText(`Booking Type: ${booking.bookingType.charAt(0).toUpperCase() + booking.bookingType.slice(1)}`, yPos);
+        yPos += lineHeight;
+
+        // Room Details
+        pdf.setFont("helvetica", "bold");
+        yPos = addText('ROOM DETAILS', yPos, 14);
+        pdf.setFont("helvetica", "normal");
+        yPos += lineHeight / 2;
 
         booking.rooms.forEach(room => {
-            lines.push(`Room: ${room.name}`);
-            lines.push(`Time Slot: ${getTimeSlotText(room.timeSlot)}`);
-            lines.push('Dates:');
+            yPos = addText(`Room: ${room.name}`, yPos);
+            yPos = addText(`Time Slot: ${getTimeSlotText(room.timeSlot)}`, yPos);
+            yPos = addText('Dates:', yPos);
             room.dates.forEach(date => {
-                lines.push(`  - ${formatDate(date)}`);
+                yPos = addText(`  • ${formatDate(date)}`, yPos);
             });
-            lines.push('');
+            yPos += lineHeight;
         });
 
-        lines.push('=== PAYMENT DETAILS ===');
-        lines.push(`Total Amount: $${booking.totalAmount.toFixed(2)}`);
-        lines.push('Security Deposit: $250.00 (Refundable)');
-        lines.push('');
-        lines.push('Thank you for choosing Hire a Clinic!');
-        lines.push('For any queries, please contact our support team.');
+        // Payment Details
+        pdf.setFont("helvetica", "bold");
+        yPos = addText('PAYMENT DETAILS', yPos, 14);
+        pdf.setFont("helvetica", "normal");
+        yPos += lineHeight / 2;
 
-        return lines.join('\n');
+        yPos = addText(`Total Amount: $${booking.totalAmount.toFixed(2)}`, yPos);
+        yPos = addText('Security Deposit: $250.00 (Refundable)', yPos);
+        yPos += lineHeight;
+
+        // Footer
+        yPos = addText('Thank you for choosing Hire a Clinic!', yPos);
+        yPos = addText('For any queries, please contact our support team.', yPos);
+
+        return pdf;
     };
 
     const handleDownload = () => {
@@ -100,20 +138,8 @@ const ConfirmationPage = () => {
         setIsDownloading(true);
 
         try {
-            // Create booking summary text
-            const summary = generateBookingSummary(bookingDetails);
-
-            // Create blob and download
-            const blob = new Blob([summary], { type: 'text/plain' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `booking-confirmation-${new Date().getTime()}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-            
+            const pdf = generatePDF(bookingDetails);
+            pdf.save(`booking-confirmation-${new Date().getTime()}.pdf`);
             toast.success('Booking confirmation downloaded successfully');
         } catch (error) {
             console.error('Download failed:', error);
@@ -208,9 +234,8 @@ const ConfirmationPage = () => {
                             <button
                                 onClick={handleDownload}
                                 disabled={isDownloading}
-                                className={`inline-flex items-center justify-center px-6 py-3 rounded-lg text-white ${
-                                    isDownloading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                                } transition-colors duration-200`}
+                                className={`inline-flex items-center justify-center px-6 py-3 rounded-lg text-white ${isDownloading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                                    } transition-colors duration-200`}
                             >
                                 {isDownloading ? (
                                     <>

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
 import { PRICING, TimeSlot, BookingType } from '@/constants/pricing';
+import Header from '@/components/Header';
 
 interface RoomBooking {
     id: number;
@@ -561,15 +562,19 @@ const CalendarPage: React.FC = () => {
     // Show loading state while checking authentication
     if (!userData) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            <div className="min-h-screen bg-gray-50">
+                <Header />
+                <div className="flex items-center justify-center min-h-screen">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-12">
-            <div className="container mx-auto px-4">
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
+            <Header />
+            <div className="container mx-auto px-4 pt-20">
                 <div className="max-w-6xl mx-auto">
                     {selectedRooms.length === 0 && (
                         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-center">
@@ -582,38 +587,6 @@ const CalendarPage: React.FC = () => {
                             <p className="text-red-500">You must select at least one room before proceeding with the booking.</p>
                         </div>
                     )}
-
-                    {/* User Profile Icon */}
-                    <div className="absolute top-4 right-4">
-                        <div className="relative">
-                            <button
-                                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                                className="flex items-center space-x-2"
-                            >
-                                <img
-                                    src={userData.profileImage || '/default-avatar.png'}
-                                    alt="Profile"
-                                    className="w-10 h-10 rounded-full"
-                                />
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </button>
-                            {showProfileMenu && (
-                                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1">
-                                    <a href="/profile" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                        View Profile
-                                    </a>
-                                    <button
-                                        onClick={handleLogout}
-                                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                    >
-                                        Logout
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
 
                     {/* Back Button */}
                     <button

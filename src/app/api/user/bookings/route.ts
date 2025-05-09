@@ -15,14 +15,16 @@ export async function GET(req: Request) {
 
         const { db } = await connectToDatabase();
 
-        // Check if user has any previous bookings
-        const bookingsCount = await db.collection('bookings').countDocuments({
-            userId: session.user.id
-        });
+        // Fetch all bookings for the user
+        const bookings = await db.collection('bookings')
+            .find({
+                userId: session.user.id
+            })
+            .sort({ createdAt: -1 }) // Sort by most recent first
+            .toArray();
 
         return NextResponse.json({
-            hasBookings: bookingsCount > 0,
-            bookingsCount
+            bookings
         });
     } catch (error) {
         console.error('Failed to fetch user bookings:', error);

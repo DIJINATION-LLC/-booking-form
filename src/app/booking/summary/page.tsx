@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { PRICING, TimeSlot, BookingType } from '@/constants/pricing';
+import Header from '@/components/Header';
 
 interface Room {
     id: number;
@@ -247,8 +248,9 @@ const SummaryPage = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-12">
-            <div className="container mx-auto px-4">
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
+            <Header />
+            <div className="container mx-auto px-4 pt-20">
                 <div className="max-w-3xl mx-auto">
                     <button
                         onClick={() => router.push('/booking/calendar')}

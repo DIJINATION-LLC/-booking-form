@@ -1,24 +1,27 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth';
 import { ObjectId } from 'mongodb';
+
+interface BookingRoom {
+    id: number;
+    timeSlot: 'full' | 'morning' | 'evening';
+    dates: string[];
+}
+
+interface BookingData {
+    userId: string;
+    rooms: BookingRoom[];
+    bookingType: 'daily' | 'monthly';
+    totalAmount: number;
+}
 
 export async function POST(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
-        if (!session) {
-            return NextResponse.json(
-                { error: 'Unauthorized' },
-                { status: 401 }
-            );
-        }
-
         const { db } = await connectToDatabase();
-        const bookingData = await req.json();
+        const bookingData: BookingData = await req.json();
 
         // Validate required fields
-        if (!bookingData.rooms || !bookingData.dates || !bookingData.timeSlot || !bookingData.bookingType) {
+        if (!bookingData.userId || !bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount) {
             return NextResponse.json(
                 { error: 'Missing required booking information' },
                 { status: 400 }
@@ -27,9 +30,11 @@ export async function POST(req: Request) {
 
         // Check for existing bookings to avoid conflicts
         const existingBookings = await db.collection('bookings').find({
-            roomId: { $in: bookingData.rooms.map((id: string) => id) },
-            date: { $in: bookingData.dates.map((date: string) => new Date(date)) },
-            timeSlot: bookingData.timeSlot
+            $or: bookingData.rooms.map((room: BookingRoom) => ({
+                roomId: room.id.toString(),
+                date: { $in: room.dates.map((date: string) => new Date(date)) },
+                timeSlot: room.timeSlot
+            }))
         }).toArray();
 
         if (existingBookings.length > 0) {
@@ -39,24 +44,24 @@ export async function POST(req: Request) {
             );
         }
 
-        // Create booking records for each date and room
-        const bookingPromises = bookingData.dates.flatMap((date: string) =>
-            bookingData.rooms.map((roomId: string) => ({
-                userId: new ObjectId(session.user.id),
+        // Create booking records for each room and its dates
+        const bookingRecords = bookingData.rooms.flatMap((room: BookingRoom) =>
+            room.dates.map((date: string) => ({
+                userId: bookingData.userId,
+                roomId: room.id.toString(),
                 date: new Date(date),
-                roomId,
-                timeSlot: bookingData.timeSlot,
+                timeSlot: room.timeSlot,
                 bookingType: bookingData.bookingType,
-                amount: bookingData.totalAmount / (bookingData.dates.length * bookingData.rooms.length),
+                amount: bookingData.totalAmount / bookingData.rooms.reduce((total: number, r: BookingRoom) => total + r.dates.length, 0),
                 createdAt: new Date()
             }))
         );
 
-        const result = await db.collection('bookings').insertMany(bookingPromises);
+        const result = await db.collection('bookings').insertMany(bookingRecords);
 
         // Update user record with booking status
         await db.collection('users').updateOne(
-            { _id: new ObjectId(session.user.id) },
+            { _id: new ObjectId(bookingData.userId) },
             {
                 $set: {
                     hasBookings: true
@@ -66,7 +71,8 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
             success: true,
-            bookingIds: result.insertedIds
+            bookingIds: result.insertedIds,
+            message: 'Booking created successfully'
         });
     } catch (error) {
         console.error('Failed to create booking:', error);

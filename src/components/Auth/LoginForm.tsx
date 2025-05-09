@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signIn } from 'next-auth/react';
 import toast from 'react-hot-toast';
 
 interface LoginFormData {
@@ -16,30 +15,20 @@ const LoginForm = () => {
         email: '',
         password: '',
     });
-    const [isLoading, setIsLoading] = useState(false);
+    const [isNewUser, setIsNewUser] = useState(false);
+    const [registrationFee, setRegistrationFee] = useState(250);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsLoading(true);
-
-        try {
-            const result = await signIn('credentials', {
-                redirect: false,
-                email: formData.email,
-                password: formData.password,
-            });
-
-            if (result?.error) {
-                toast.error(result.error);
-            } else {
-                toast.success('Login successful!');
-                router.push('/booking');
-            }
-        } catch (error) {
-            toast.error('An error occurred during login');
-        } finally {
-            setIsLoading(false);
-        }
+        // Store user data in localStorage
+        localStorage.setItem('user', JSON.stringify({
+            email: formData.email,
+            firstName: 'Test',
+            lastName: 'User',
+            hasBookings: false
+        }));
+        toast.success('Login successful!');
+        router.push('/booking');
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,7 +41,9 @@ const LoginForm = () => {
 
     return (
         <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-lg">
-            <h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
+            <h2 className="text-2xl font-bold mb-6 text-center">
+                {isNewUser ? 'Register' : 'Login'}
+            </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700">Email</label>
@@ -78,14 +69,27 @@ const LoginForm = () => {
                     />
                 </div>
 
-                <div className="flex justify-end">
+                {isNewUser && (
+                    <div className="bg-yellow-50 p-4 rounded-md">
+                        <p className="text-yellow-800">
+                            Registration Fee: ${registrationFee} (one-time payment)
+                        </p>
+                    </div>
+                )}
+
+                <div className="flex justify-between items-center">
+                    <button
+                        type="button"
+                        onClick={() => setIsNewUser(!isNewUser)}
+                        className="text-blue-600 hover:text-blue-800"
+                    >
+                        {isNewUser ? 'Already have an account? Login' : 'New user? Register'}
+                    </button>
                     <button
                         type="submit"
-                        disabled={isLoading}
-                        className={`w-full bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''
-                            }`}
+                        className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                     >
-                        {isLoading ? 'Logging in...' : 'Login'}
+                        {isNewUser ? 'Register' : 'Login'}
                     </button>
                 </div>
             </form>

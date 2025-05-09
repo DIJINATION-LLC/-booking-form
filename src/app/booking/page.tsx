@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { useSession } from 'next-auth/react';
 
 type TimeSlot = 'full' | 'morning' | 'evening';
 
@@ -18,7 +17,6 @@ interface Room {
 
 const BookingOptions = () => {
     const router = useRouter();
-    const { data: session, status } = useSession();
     const [selectedOption, setSelectedOption] = useState<'daily' | 'monthly'>('daily');
     const [rooms, setRooms] = useState<Room[]>([
         {
@@ -47,12 +45,14 @@ const BookingOptions = () => {
         }
     ]);
 
-    useEffect(() => {
-        if (status === 'unauthenticated') {
+    // Add authentication check
+    React.useEffect(() => {
+        const user = localStorage.getItem('user');
+        if (!user) {
             toast.error('Please login to continue');
             router.push('/');
         }
-    }, [status, router]);
+    }, [router]);
 
     const handleRoomSelect = (roomId: number) => {
         setRooms(rooms.map(room => {
@@ -85,42 +85,43 @@ const BookingOptions = () => {
     };
 
     const handleContinue = () => {
-        if (!session) {
+        // Check authentication
+        const user = localStorage.getItem('user');
+        if (!user) {
             toast.error('Please login to continue');
             router.push('/');
             return;
         }
 
+        // Validate room selection
         const selectedRooms = rooms.filter(r => r.selected);
         if (selectedRooms.length === 0) {
             toast.error('Please select at least one room');
             return;
         }
 
-        // Add dates array to each selected room before storing
-        const roomsWithDates = selectedRooms.map(room => ({
-            ...room,
-            dates: []
-        }));
+        try {
+            // Add dates array to each selected room before storing
+            const roomsWithDates = selectedRooms.map(room => ({
+                ...room,
+                dates: []
+            }));
 
-        localStorage.setItem('bookingType', selectedOption);
-        localStorage.setItem('selectedRooms', JSON.stringify(roomsWithDates));
-        toast.success('Proceeding to calendar...');
-        router.push('/booking/calendar');
+            // Store booking data
+            localStorage.setItem('bookingType', selectedOption);
+            localStorage.setItem('selectedRooms', JSON.stringify(roomsWithDates));
+
+            toast.success('Proceeding to calendar...');
+            router.push('/booking/calendar');
+        } catch (error) {
+            console.error('Error storing booking data:', error);
+            toast.error('Error preparing booking data');
+        }
     };
 
     const handleBack = () => {
         router.back();
     };
-
-    // Show loading state while checking authentication
-    if (status === 'loading') {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-            </div>
-        );
-    }
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-12">

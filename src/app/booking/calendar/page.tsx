@@ -19,8 +19,9 @@ interface RoomBooking {
 
 interface BookingStatus {
     date: string;
-    type: 'full' | 'morning' | 'evening' | 'none';
-    roomId: number;
+    roomId: string;
+    type: 'none' | 'booked' | 'partial';
+    timeSlots: TimeSlot[];
 }
 
 interface UserData {
@@ -36,44 +37,64 @@ interface StoredRoomBooking extends Omit<RoomBooking, 'dates'> {
 
 const CalendarPage: React.FC = () => {
     const router = useRouter();
-    const { data: session, status } = useSession();
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [bookingType, setBookingType] = useState<'daily' | 'monthly'>('daily');
     const [showTimeSlots, setShowTimeSlots] = useState(false);
-    const [bookingStatus, setBookingStatus] = useState<Array<{ date: string; type: 'none' | 'booked' | 'partial' }>>([]);
+    const [bookingStatus, setBookingStatus] = useState<BookingStatus[]>([]);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [userData, setUserData] = useState<UserData | null>(null);
     const [selectedRooms, setSelectedRooms] = useState<RoomBooking[]>([]);
     const [showHalfDayOptions, setShowHalfDayOptions] = useState(false);
 
     useEffect(() => {
-        // Check authentication status
-        if (status === 'unauthenticated') {
+        // Check authentication using localStorage
+        const user = localStorage.getItem('user');
+        if (!user) {
             toast.error('Please login to continue');
             router.push('/');
             return;
         }
 
-        // Fetch user data from localStorage
-        const user = localStorage.getItem('user');
-        if (user) {
-            setUserData(JSON.parse(user));
-        }
+        // Set user data
+        setUserData(JSON.parse(user));
 
+        // Get stored booking data
         const storedRooms = localStorage.getItem('selectedRooms');
         const storedBookingType = localStorage.getItem('bookingType');
 
-        if (storedRooms) {
+        if (!storedRooms || !storedBookingType) {
+            toast.error('Please select rooms before proceeding to calendar');
+            router.push('/booking');
+            return;
+        }
+
+        try {
             const parsedRooms = JSON.parse(storedRooms);
             setSelectedRooms(parsedRooms);
-        }
-
-        if (storedBookingType) {
             setBookingType(storedBookingType as 'daily' | 'monthly');
+        } catch (error) {
+            console.error('Error parsing stored data:', error);
+            toast.error('Error loading booking data');
+            router.push('/booking');
+            return;
         }
+    }, [router]);
 
-        fetchBookingStatus();
-    }, [status, router]);
+    // Add new useEffect to fetch booking status when month or selected rooms change
+    useEffect(() => {
+        if (selectedRooms.length > 0) {
+            console.log('Fetching booking status for rooms:', selectedRooms);
+            fetchBookingStatus();
+        }
+    }, [currentMonth, selectedRooms, bookingType]);
+
+    // Add useEffect to refetch when component mounts
+    useEffect(() => {
+        if (selectedRooms.length > 0) {
+            console.log('Initial fetch of booking status');
+            fetchBookingStatus();
+        }
+    }, []);
 
     const handleLogout = () => {
         localStorage.removeItem('user');
@@ -82,23 +103,27 @@ const CalendarPage: React.FC = () => {
 
     const fetchBookingStatus = async () => {
         try {
-            const response = await fetch('/api/bookings/status', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    month: currentMonth.getMonth() + 1,
-                    year: currentMonth.getFullYear()
-                }),
+            // Fetch booking status for each selected room
+            const promises = selectedRooms.map(room => {
+                const roomId = room.id.toString(); // Convert to string consistently
+                return fetch('/api/bookings/status', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        month: currentMonth.getMonth() + 1,
+                        year: currentMonth.getFullYear(),
+                        roomId
+                    }),
+                }).then(res => res.json())
             });
 
-            if (!response.ok) {
-                throw new Error('Failed to fetch booking status');
-            }
-
-            const data = await response.json();
-            setBookingStatus(data.bookings);
+            const results = await Promise.all(promises);
+            console.log('Booking status results:', results);
+            const allBookings = results.flatMap(result => result.bookings);
+            console.log('All bookings:', allBookings);
+            setBookingStatus(allBookings);
         } catch (error) {
             console.error('Failed to fetch booking status:', error);
             toast.error('Failed to load booking availability');
@@ -119,6 +144,12 @@ const CalendarPage: React.FC = () => {
     };
 
     const handleDateSelection = (date: Date, roomId: number) => {
+        // Check if the date is already booked for this room
+        if (isDateBooked(date, roomId, 'full')) {
+            toast.error('This date is already booked for this room');
+            return;
+        }
+
         if (bookingType === 'monthly') {
             const startDate = new Date(date);
             const endDate = new Date(date);
@@ -131,8 +162,8 @@ const CalendarPage: React.FC = () => {
                 const day = currentDate.getDay();
                 const dateStr = currentDate.toISOString().split('T')[0];
 
-                // Only add if it's Monday–Friday and not booked
-                if (day >= 1 && day <= 5 && !isDateBooked(currentDate)) {
+                // Only add if it's Monday–Friday and not booked for this room
+                if (day >= 1 && day <= 5 && !isDateBooked(currentDate, roomId, 'full')) {
                     dates.push(dateStr);
                 }
 
@@ -154,18 +185,24 @@ const CalendarPage: React.FC = () => {
                 localStorage.setItem('bookingType', bookingType);
                 return updatedRooms;
             });
-
         } else {
-            // Daily booking logic (no changes)
+            // Daily booking logic
+            const dateStr = date.toISOString().split('T')[0];
+
             setSelectedRooms((prev) => {
                 const updatedRooms = prev.map(room => {
                     if (room.id === roomId) {
-                        const dateStr = date.toISOString().split('T')[0];
                         const dateIndex = room.dates?.indexOf(dateStr) ?? -1;
                         let newDates = room.dates || [];
 
                         if (dateIndex === -1) {
-                            newDates = [...newDates, dateStr];
+                            // Check if the date is already booked before adding
+                            if (!isDateBooked(date, roomId, 'full')) {
+                                newDates = [...newDates, dateStr];
+                            } else {
+                                toast.error('This date is already booked for this room');
+                                return room;
+                            }
                         } else {
                             newDates = newDates.filter(d => d !== dateStr);
                         }
@@ -184,15 +221,37 @@ const CalendarPage: React.FC = () => {
 
     const handleTimeSlotChange = (roomId: number, timeSlot: TimeSlot) => {
         setSelectedRooms(prev =>
-            prev.map(room =>
-                room.id === roomId
-                    ? { ...room, timeSlot }
-                    : room
-            )
+            prev.map(room => {
+                if (room.id === roomId) {
+                    // Clear any selected dates when changing time slot
+                    return { ...room, timeSlot, dates: [] };
+                }
+                return room;
+            })
         );
 
         // Save to localStorage
         localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
+    };
+
+    const isTimeSlotAvailable = (roomId: number, date: Date, timeSlot: TimeSlot): boolean => {
+        const dateStr = date.toISOString().split('T')[0];
+        const status = bookingStatus.find(b =>
+            b.date === dateStr &&
+            b.roomId === roomId.toString()
+        );
+
+        if (!status) return true; // No bookings, all slots available
+
+        if (status.timeSlots.includes('full')) return false; // Full day booked, no slots available
+
+        if (timeSlot === 'full') {
+            // Can't book full day if any slot is taken
+            return !status.timeSlots.includes('morning') && !status.timeSlots.includes('evening');
+        }
+
+        // For half-day bookings, check specific slot
+        return !status.timeSlots.includes(timeSlot);
     };
 
     const getTimeSlotText = (slot: TimeSlot): string => {
@@ -288,42 +347,109 @@ const CalendarPage: React.FC = () => {
         setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1));
     };
 
+    const isDateBooked = (date: Date, roomId: number, timeSlot: TimeSlot): boolean => {
+        const dateStr = date.toISOString().split('T')[0];
+        const roomIdStr = roomId.toString();
+        const status = bookingStatus.find(b => b.date === dateStr && b.roomId === roomIdStr);
+
+        if (!status) return false;
+
+        if (status.timeSlots.includes('full')) return true;
+
+        // For partial bookings, check if the requested time slot is available
+        if (timeSlot === 'full') {
+            // Can't book full day if any slot is taken
+            return status.timeSlots.includes('morning') || status.timeSlots.includes('evening');
+        }
+
+        // For half-day bookings, only check the specific slot requested
+        return status.timeSlots.includes(timeSlot);
+    };
+
     const getDateClassName = (date: Date | null, room: RoomBooking) => {
         if (!date) return 'bg-gray-100 text-gray-400 cursor-not-allowed';
 
         const dateStr = date.toISOString().split('T')[0];
         const isSelected = room.dates?.includes(dateStr);
 
+        // Check weekend first
         if (isWeekend(date)) {
             return 'bg-gray-100 text-gray-400 cursor-not-allowed';
         }
 
-        if (isDateBooked(date)) {
-            return 'bg-red-100 text-red-600 cursor-not-allowed';
+        // Get booking status
+        const status = bookingStatus.find(b =>
+            b.date === dateStr &&
+            b.roomId === room.id.toString()
+        );
+
+        // Handle different booking states
+        if (status) {
+            const hasMorning = status.timeSlots.includes('morning');
+            const hasEvening = status.timeSlots.includes('evening');
+            const hasFull = status.timeSlots.includes('full');
+
+            // If full day is booked, all slots are unavailable
+            if (hasFull) {
+                return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
+            }
+
+            // For full day booking view
+            if (room.timeSlot === 'full') {
+                // If either morning or evening is booked, full day is not available
+                if (hasMorning || hasEvening) {
+                    return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
+                }
+            }
+
+            // For morning slot booking
+            if (room.timeSlot === 'morning') {
+                if (hasMorning) {
+                    // Morning is booked
+                    return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
+                }
+                if (hasEvening) {
+                    // Evening is booked but morning is available
+                    if (isSelected) {
+                        return 'bg-gradient-to-b from-blue-500 from-50% to-red-100 to-50% text-gray-900';
+                    }
+                    return 'bg-gradient-to-b from-white from-50% to-red-100 to-50% cursor-pointer hover:from-blue-50';
+                }
+            }
+
+            // For evening slot booking
+            if (room.timeSlot === 'evening') {
+                if (hasEvening) {
+                    // Evening is booked
+                    return 'bg-red-100 text-red-600 cursor-not-allowed hover:bg-red-100';
+                }
+                if (hasMorning) {
+                    // Morning is booked but evening is available
+                    if (isSelected) {
+                        return 'bg-gradient-to-b from-red-100 from-50% to-blue-500 to-50% text-gray-900';
+                    }
+                    return 'bg-gradient-to-b from-red-100 from-50% to-white to-50% cursor-pointer hover:to-blue-50';
+                }
+            }
         }
 
+        // Handle selected states with proper gradients
         if (isSelected) {
             if (room.timeSlot === 'morning') {
-                return 'bg-gradient-to-b from-blue-500 to-white text-white hover:from-blue-600 hover:to-white';
+                return 'bg-gradient-to-b from-blue-500 from-50% to-transparent to-50% text-gray-900';
             } else if (room.timeSlot === 'evening') {
-                return 'bg-gradient-to-t from-blue-500 to-white text-white hover:from-blue-600 hover:to-white';
+                return 'bg-gradient-to-b from-transparent from-50% to-blue-500 to-50% text-gray-900';
             } else {
                 return 'bg-blue-500 text-white hover:bg-blue-600';
             }
         }
 
-        return 'bg-white hover:bg-blue-50 cursor-pointer';
-    };
-
-
-    const isDateBooked = (date: Date): boolean => {
-        const dateStr = date.toISOString().split('T')[0];
-        const status = bookingStatus.find(b => b.date === dateStr);
-        return status ? status.type === 'booked' : false;
+        // Default available state
+        return 'bg-white hover:bg-blue-50 cursor-pointer text-gray-900';
     };
 
     const handleProceed = async () => {
-        if (!session) {
+        if (!userData) {
             toast.error('Please login to continue');
             router.push('/');
             return;
@@ -333,50 +459,101 @@ const CalendarPage: React.FC = () => {
             toast.error('Please select at least one room');
             return;
         }
-        if (selectedRooms.every(room => !room.dates?.length)) {
-            toast.error('Please select dates for your rooms');
+
+        const roomsWithDates = selectedRooms.filter(room => room.dates && room.dates.length > 0);
+        if (roomsWithDates.length === 0) {
+            toast.error('Please select dates for at least one room');
             return;
         }
 
         try {
             // Prepare booking data
             const bookingData = {
-                rooms: selectedRooms.map(room => room.id),
-                dates: selectedRooms.flatMap(room => room.dates || []),
-                timeSlot: selectedRooms[0].timeSlot,
+                rooms: selectedRooms.map(room => ({
+                    id: room.id,
+                    timeSlot: room.timeSlot,
+                    dates: room.dates || []
+                })),
                 bookingType,
-                totalAmount: calculatePrice().total,
-                isNewUser: !userData?.hasBookings
+                totalAmount: calculatePrice().total
             };
 
-            // Submit booking to server
-            const response = await fetch('/api/bookings/create', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(bookingData),
-            });
+            // Store booking data in localStorage for the summary page
+            localStorage.setItem('bookingData', JSON.stringify(bookingData));
 
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.error || 'Failed to create booking');
-            }
-
-            // Clear selected rooms from localStorage
+            // Clear selected rooms from localStorage since we're moving to summary
             localStorage.removeItem('selectedRooms');
             localStorage.removeItem('bookingType');
 
-            toast.success('Booking created successfully!');
-            router.push('/booking/confirmation');
+            toast.success('Proceeding to booking summary...');
+            router.push('/booking/summary');
         } catch (error) {
-            console.error('Failed to create booking:', error);
-            toast.error(error instanceof Error ? error.message : 'Failed to create booking');
+            console.error('Failed to proceed to summary:', error);
+            toast.error('Failed to proceed to booking summary. Please try again.');
         }
     };
 
+    const renderTimeSlotButtons = (room: RoomBooking) => {
+        const hasPartialBooking = selectedRooms.some(r =>
+            r.id === room.id && r.dates?.some(dateStr => {
+                const status = bookingStatus.find(b =>
+                    b.date === dateStr &&
+                    b.roomId === room.id.toString()
+                );
+                return status && (status.timeSlots.includes('morning') || status.timeSlots.includes('evening'));
+            })
+        );
+
+        return (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <button
+                    onClick={() => handleTimeSlotChange(room.id, 'full')}
+                    disabled={hasPartialBooking}
+                    className={`p-6 rounded-xl border-2 transition-all duration-300 
+                        ${room.timeSlot === 'full'
+                            ? 'border-blue-500 bg-blue-50 shadow-lg'
+                            : hasPartialBooking
+                                ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-50'
+                                : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
+                        }`}
+                >
+                    <div className="flex flex-col items-center">
+                        <h3 className="font-semibold text-xl mb-2">Full Day</h3>
+                        <p className="text-gray-600">8:00 AM - 5:00 PM</p>
+                        <div className="text-blue-600 font-bold mt-2">
+                            ${bookingType === 'daily' ? '300/day' : '2000/month'}
+                        </div>
+                        {hasPartialBooking && (
+                            <p className="text-xs text-red-500 mt-2">Not available with half-day bookings</p>
+                        )}
+                    </div>
+                </button>
+
+                <button
+                    onClick={() => {
+                        setShowHalfDayOptions(true);
+                        handleTimeSlotChange(room.id, 'morning');
+                    }}
+                    className={`p-6 rounded-xl border-2 transition-all duration-300 
+                        ${room.timeSlot !== 'full'
+                            ? 'border-blue-500 bg-blue-50 shadow-lg'
+                            : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
+                        }`}
+                >
+                    <div className="flex flex-col items-center">
+                        <h3 className="font-semibold text-xl mb-2">Half Day</h3>
+                        <p className="text-gray-600">Morning or Evening</p>
+                        <div className="text-blue-600 font-bold mt-2">
+                            ${bookingType === 'daily' ? '160/day' : '1200/month'}
+                        </div>
+                    </div>
+                </button>
+            </div>
+        );
+    };
+
     // Show loading state while checking authentication
-    if (status === 'loading') {
+    if (!userData) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -408,7 +585,7 @@ const CalendarPage: React.FC = () => {
                                 className="flex items-center space-x-2"
                             >
                                 <img
-                                    src={userData?.profileImage || '/default-avatar.png'}
+                                    src={userData.profileImage || '/default-avatar.png'}
                                     alt="Profile"
                                     className="w-10 h-10 rounded-full"
                                 />
@@ -454,43 +631,7 @@ const CalendarPage: React.FC = () => {
                             {selectedRooms.map(room => (
                                 <div key={room.id} className="bg-white rounded-2xl shadow-xl p-8 mb-8">
                                     <h2 className="text-3xl font-semibold mb-6">Select Time Slot for {room.name}</h2>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                        <button
-                                            onClick={() => handleTimeSlotChange(room.id, 'full')}
-                                            className={`p-6 rounded-xl border-2 transition-all duration-300 ${room.timeSlot === 'full'
-                                                ? 'border-blue-500 bg-blue-50 shadow-lg'
-                                                : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
-                                                }`}
-                                        >
-                                            <div className="flex flex-col items-center">
-                                                <h3 className="font-semibold text-xl mb-2">Full Day</h3>
-                                                <p className="text-gray-600">8:00 AM - 5:00 PM</p>
-                                                <div className="text-blue-600 font-bold mt-2">
-                                                    ${bookingType === 'daily' ? '300/day' : '2000/month'}
-                                                </div>
-                                            </div>
-                                        </button>
-
-                                        <button
-                                            onClick={() => {
-                                                setShowHalfDayOptions(true);
-                                                // Set default half-day option to morning when clicking half-day
-                                                handleTimeSlotChange(room.id, 'morning');
-                                            }}
-                                            className={`p-6 rounded-xl border-2 transition-all duration-300 ${room.timeSlot !== 'full'
-                                                ? 'border-blue-500 bg-blue-50 shadow-lg'
-                                                : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
-                                                }`}
-                                        >
-                                            <div className="flex flex-col items-center">
-                                                <h3 className="font-semibold text-xl mb-2">Half Day</h3>
-                                                <p className="text-gray-600">Morning or Evening</p>
-                                                <div className="text-blue-600 font-bold mt-2">
-                                                    ${bookingType === 'daily' ? '160/day' : '1200/month'}
-                                                </div>
-                                            </div>
-                                        </button>
-                                    </div>
+                                    {renderTimeSlotButtons(room)}
 
                                     {showHalfDayOptions && (
                                         <div className="mt-6 space-y-4">
@@ -498,9 +639,25 @@ const CalendarPage: React.FC = () => {
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <button
                                                     onClick={() => handleTimeSlotChange(room.id, 'morning')}
-                                                    className={`p-6 rounded-xl border-2 transition-all duration-300 ${room.timeSlot === 'morning'
-                                                        ? 'border-blue-500 bg-blue-50 shadow-lg'
-                                                        : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
+                                                    disabled={room.dates?.some(dateStr => {
+                                                        const status = bookingStatus.find(b =>
+                                                            b.date === dateStr &&
+                                                            b.roomId === room.id.toString()
+                                                        );
+                                                        return status && status.timeSlots.includes('morning');
+                                                    })}
+                                                    className={`p-6 rounded-xl border-2 transition-all duration-300 
+                                                        ${room.timeSlot === 'morning'
+                                                            ? 'border-blue-500 bg-blue-50 shadow-lg'
+                                                            : room.dates?.some(dateStr => {
+                                                                const status = bookingStatus.find(b =>
+                                                                    b.date === dateStr &&
+                                                                    b.roomId === room.id.toString()
+                                                                );
+                                                                return status && status.timeSlots.includes('morning');
+                                                            })
+                                                                ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-50'
+                                                                : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
                                                         }`}
                                                 >
                                                     <div className="flex flex-col items-center">
@@ -511,9 +668,25 @@ const CalendarPage: React.FC = () => {
 
                                                 <button
                                                     onClick={() => handleTimeSlotChange(room.id, 'evening')}
-                                                    className={`p-6 rounded-xl border-2 transition-all duration-300 ${room.timeSlot === 'evening'
-                                                        ? 'border-blue-500 bg-blue-50 shadow-lg'
-                                                        : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
+                                                    disabled={room.dates?.some(dateStr => {
+                                                        const status = bookingStatus.find(b =>
+                                                            b.date === dateStr &&
+                                                            b.roomId === room.id.toString()
+                                                        );
+                                                        return status && status.timeSlots.includes('evening');
+                                                    })}
+                                                    className={`p-6 rounded-xl border-2 transition-all duration-300 
+                                                        ${room.timeSlot === 'evening'
+                                                            ? 'border-blue-500 bg-blue-50 shadow-lg'
+                                                            : room.dates?.some(dateStr => {
+                                                                const status = bookingStatus.find(b =>
+                                                                    b.date === dateStr &&
+                                                                    b.roomId === room.id.toString()
+                                                                );
+                                                                return status && status.timeSlots.includes('evening');
+                                                            })
+                                                                ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-50'
+                                                                : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
                                                         }`}
                                                 >
                                                     <div className="flex flex-col items-center">
@@ -560,16 +733,28 @@ const CalendarPage: React.FC = () => {
                                         </div>
 
                                         <div className="grid grid-cols-7 gap-2">
-                                            {getDaysInMonth(currentMonth).map((date, index) => (
-                                                <button
-                                                    key={index}
-                                                    onClick={() => date && handleDateSelection(date, room.id)}
-                                                    disabled={!date || isWeekend(date) || isDateBooked(date)}
-                                                    className={`aspect-square p-2 rounded-lg text-center transition-all duration-200 ${getDateClassName(date, room)}`}
-                                                >
-                                                    {date?.getDate()}
-                                                </button>
-                                            ))}
+                                            {getDaysInMonth(currentMonth).map((date, index) => {
+                                                const isBooked = date && isDateBooked(date, room.id, room.timeSlot);
+                                                const isWeekendDay = date && isWeekend(date);
+                                                const canSelect = date && !isWeekendDay && !isBooked;
+
+                                                return (
+                                                    <button
+                                                        key={index}
+                                                        onClick={() => canSelect && handleDateSelection(date, room.id)}
+                                                        disabled={!canSelect}
+                                                        className={`aspect-square p-2 rounded-lg text-center transition-all duration-200 ${getDateClassName(date, room)}`}
+                                                        title={
+                                                            !date ? "" :
+                                                                isWeekendDay ? "Weekend is not available" :
+                                                                    isBooked ? `This time slot (${room.timeSlot}) is already booked` :
+                                                                        ""
+                                                        }
+                                                    >
+                                                        {date?.getDate()}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
 
                                         <div className="mt-6 space-y-2">
@@ -579,7 +764,15 @@ const CalendarPage: React.FC = () => {
                                             </div>
                                             <div className="flex items-center space-x-2">
                                                 <div className="w-4 h-4 bg-red-100 rounded"></div>
-                                                <span>Booked</span>
+                                                <span>Fully Booked</span>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <div className="w-4 h-4 bg-gradient-to-b from-red-100 from-50% to-white to-50% rounded"></div>
+                                                <span>Morning Booked</span>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <div className="w-4 h-4 bg-gradient-to-b from-white from-50% to-red-100 to-50% rounded"></div>
+                                                <span>Evening Booked</span>
                                             </div>
                                             <div className="flex items-center space-x-2">
                                                 <div className="w-4 h-4 bg-gray-100 rounded"></div>

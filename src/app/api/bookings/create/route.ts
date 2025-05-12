@@ -8,11 +8,17 @@ interface BookingRoom {
     dates: string[];
 }
 
+interface PaymentDetails {
+    cardLast4: string;
+    cardholderName: string;
+}
+
 interface BookingData {
     userId: string;
     rooms: BookingRoom[];
     bookingType: 'daily' | 'monthly';
     totalAmount: number;
+    paymentDetails: PaymentDetails;
 }
 
 export async function POST(req: Request) {
@@ -21,7 +27,7 @@ export async function POST(req: Request) {
         const bookingData: BookingData = await req.json();
 
         // Validate required fields
-        if (!bookingData.userId || !bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount) {
+        if (!bookingData.userId || !bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount || !bookingData.paymentDetails) {
             return NextResponse.json(
                 { error: 'Missing required booking information' },
                 { status: 400 }
@@ -44,6 +50,10 @@ export async function POST(req: Request) {
             );
         }
 
+        // Calculate amount per booking
+        const totalBookings = bookingData.rooms.reduce((total: number, r: BookingRoom) => total + r.dates.length, 0);
+        const amountPerBooking = bookingData.totalAmount / totalBookings;
+
         // Create booking records for each room and its dates
         const bookingRecords = bookingData.rooms.flatMap((room: BookingRoom) =>
             room.dates.map((date: string) => ({
@@ -52,11 +62,13 @@ export async function POST(req: Request) {
                 date: new Date(date),
                 timeSlot: room.timeSlot,
                 bookingType: bookingData.bookingType,
-                amount: bookingData.totalAmount / bookingData.rooms.reduce((total: number, r: BookingRoom) => total + r.dates.length, 0),
+                amount: amountPerBooking,
+                paymentDetails: bookingData.paymentDetails,
                 createdAt: new Date()
             }))
         );
 
+        // Insert bookings
         const result = await db.collection('bookings').insertMany(bookingRecords);
 
         // Update user record with booking status
@@ -64,10 +76,24 @@ export async function POST(req: Request) {
             { _id: new ObjectId(bookingData.userId) },
             {
                 $set: {
-                    hasBookings: true
+                    hasBookings: true,
+                    lastBooking: new Date()
                 }
             }
         );
+
+        // Store booking data in Excel-like format
+        const bookingSummary = {
+            userId: bookingData.userId,
+            bookingIds: Object.values(result.insertedIds),
+            totalAmount: bookingData.totalAmount,
+            bookingType: bookingData.bookingType,
+            paymentDetails: bookingData.paymentDetails,
+            rooms: bookingData.rooms,
+            createdAt: new Date()
+        };
+
+        await db.collection('bookingSummaries').insertOne(bookingSummary);
 
         return NextResponse.json({
             success: true,

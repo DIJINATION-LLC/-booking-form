@@ -102,10 +102,11 @@ const BookingOptions = () => {
         }
 
         try {
-            // Add dates array to each selected room before storing
+            // Add dates array to each selected room before storing and set default time slot to full
             const roomsWithDates = selectedRooms.map(room => ({
                 ...room,
-                dates: []
+                dates: [],
+                timeSlot: 'full'
             }));
 
             // Store booking data
@@ -128,7 +129,7 @@ const BookingOptions = () => {
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
             <Header />
             <div className="container mx-auto px-4 pt-20">
-                <div className="max-w-6xl mx-auto">
+                <div className="max-w-6xl mx-auto bg-red-500">
                     {/* Back Button */}
                     <button
                         onClick={handleBack}
@@ -204,7 +205,7 @@ const BookingOptions = () => {
                                     <div
                                         onClick={() => handleRoomSelect(room.id)}
                                         className={`cursor-pointer ${room.selected
-                                            ? 'border-blue-500 shadow-lg'
+                                            ? 'border-4 border-blue-500 shadow-lg'
                                             : 'border-gray-200 hover:border-blue-300'
                                             }`}
                                     >
@@ -214,60 +215,19 @@ const BookingOptions = () => {
                                                 alt={room.name}
                                                 className="object-cover w-full h-full"
                                             />
+                                            {room.selected && (
+                                                <div className="absolute top-4 right-4 bg-blue-500 text-white p-2 rounded-full">
+                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="p-6">
-                                            <h3 className="text-xl font-semibold mb-2 text-gray-800">{room.name}</h3>
-                                            <p className="text-gray-600 mb-4">{room.description}</p>
-                                            <div className="flex items-center">
-                                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${room.selected
-                                                    ? 'bg-blue-500 border-blue-500'
-                                                    : 'border-gray-300'
-                                                    }`}>
-                                                    {room.selected && (
-                                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                        </svg>
-                                                    )}
-                                                </div>
-                                                <span className="ml-2 text-gray-600">Select Room</span>
-                                            </div>
+                                            <h3 className="text-xl font-semibold mb-2">{room.name}</h3>
+                                            <p className="text-gray-600">{room.description}</p>
                                         </div>
                                     </div>
-
-                                    {room.selected && (
-                                        <div className="p-6 bg-gray-50 border-t border-gray-200">
-                                            <h4 className="font-medium mb-3">Select Time Slot</h4>
-                                            <div className="grid grid-cols-3 gap-2">
-                                                <button
-                                                    onClick={() => handleTimeSlotChange(room.id, 'full')}
-                                                    className={`p-2 rounded text-sm ${room.timeSlot === 'full'
-                                                        ? 'bg-blue-500 text-white'
-                                                        : 'bg-white border border-gray-200 hover:border-blue-500'
-                                                        }`}
-                                                >
-                                                    Full Day
-                                                </button>
-                                                <button
-                                                    onClick={() => handleTimeSlotChange(room.id, 'morning')}
-                                                    className={`p-2 rounded text-sm ${room.timeSlot === 'morning'
-                                                        ? 'bg-blue-500 text-white'
-                                                        : 'bg-white border border-gray-200 hover:border-blue-500'
-                                                        }`}
-                                                >
-                                                    Morning
-                                                </button>
-                                                <button
-                                                    onClick={() => handleTimeSlotChange(room.id, 'evening')}
-                                                    className={`p-2 rounded text-sm ${room.timeSlot === 'evening'
-                                                        ? 'bg-blue-500 text-white'
-                                                        : 'bg-white border border-gray-200 hover:border-blue-500'
-                                                        }`}
-                                                >
-                                                    Evening
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             ))}
                         </div>

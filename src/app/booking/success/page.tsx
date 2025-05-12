@@ -108,7 +108,7 @@ const SuccessPage: React.FC = () => {
     return (
         <div className="min-h-screen bg-gray-50">
             <Header />
-            <div className="container mx-auto px-4 py-24">
+            <div className="container mx-auto px-4 pt-28">
                 <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl p-8">
                     <div className="text-center mb-8">
                         <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">

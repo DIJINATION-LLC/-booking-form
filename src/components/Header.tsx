@@ -44,15 +44,6 @@ const Header: React.FC = () => {
                         className="flex items-center cursor-pointer"
                         onClick={() => router.push('/portal')}
                     >
-                        <div className="w-20 h-20 relative mr-4">
-                            <Image
-                                src="/logo.png"
-                                alt="Logo"
-                                fill
-                                className="object-contain"
-                                priority
-                            />
-                        </div>
                         <span className="text-2xl font-semibold text-blue-600">Hire a Clinic</span>
                     </div>
 

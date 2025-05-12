@@ -141,7 +141,11 @@ const SummaryPage = () => {
     };
 
     const formatDate = (dateStr: string) => {
-        return new Date(dateStr).toLocaleDateString('en-US', {
+        // Parse the date in local timezone
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const date = new Date(year, month - 1, day); // month is 0-based in Date constructor
+
+        return date.toLocaleDateString('en-US', {
             weekday: 'long',
             month: 'long',
             day: 'numeric',
@@ -202,7 +206,11 @@ const SummaryPage = () => {
                 })),
                 bookingType,
                 totalAmount: priceBreakdown.total,
-                bookingDate: new Date().toISOString()
+                bookingDate: new Date().toISOString(),
+                paymentDetails: {
+                    cardLast4: cardDetails.cardNumber.slice(-4),
+                    cardholderName: cardDetails.name
+                }
             };
             localStorage.setItem('confirmationData', JSON.stringify(confirmationData));
 
@@ -215,7 +223,11 @@ const SummaryPage = () => {
                     dates: room.dates
                 })),
                 bookingType,
-                totalAmount: priceBreakdown.total
+                totalAmount: priceBreakdown.total,
+                paymentDetails: {
+                    cardLast4: cardDetails.cardNumber.slice(-4),
+                    cardholderName: cardDetails.name
+                }
             };
 
             // Submit booking to API
@@ -231,6 +243,15 @@ const SummaryPage = () => {
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Failed to create booking');
             }
+
+            const responseData = await response.json();
+
+            // Update user's booking status in localStorage
+            const updatedUser = {
+                ...user,
+                hasBookings: true
+            };
+            localStorage.setItem('user', JSON.stringify(updatedUser));
 
             // Clear booking data from localStorage
             localStorage.removeItem('bookingData');
@@ -249,11 +270,16 @@ const SummaryPage = () => {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
-            <Header />
-            <div className="container mx-auto px-4 pt-20">
-                <div className="max-w-3xl mx-auto">
+            {/* Header */}
+            <header className="sticky top-0 left-0 right-0 z-50 bg-white shadow-md">
+                <Header />
+            </header>
+
+            {/* Main Content */}
+            <main className="container mx-auto px-4 py-8">
+                <div className="max-w-4xl mx-auto">
                     <button
-                        onClick={() => router.push('/booking/calendar')}
+                        onClick={() => router.back()}
                         className="mb-6 flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -262,7 +288,7 @@ const SummaryPage = () => {
                         Back to Calendar
                     </button>
 
-                    <div className="bg-white rounded-2xl shadow-xl p-8">
+                    <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
                         <h1 className="text-3xl font-bold text-gray-800 mb-8">Booking Summary</h1>
 
                         {/* Room Details */}
@@ -401,20 +427,23 @@ const SummaryPage = () => {
                             </div>
                         </div>
 
-                        {/* Complete Booking Button */}
-                        <button
-                            onClick={handleCompleteBooking}
-                            disabled={isProcessing}
-                            className={`w-full py-3 px-4 rounded-lg text-white font-medium ${isProcessing
-                                ? 'bg-blue-400 cursor-not-allowed'
-                                : 'bg-blue-600 hover:bg-blue-700'
-                                }`}
-                        >
-                            {isProcessing ? 'Processing...' : 'Complete Booking'}
-                        </button>
+                        {/* Stripe Payment Button */}
+                        <div className="mt-8 border-t border-gray-200 pt-6">
+                            <button
+                                onClick={() => router.push('/booking/payment')}
+                                className="w-full flex items-center justify-center py-4 px-6 rounded-lg text-white font-medium bg-[#635BFF] hover:bg-[#4B45C6] transition-colors duration-200"
+                            >
+                                <svg className="w-8 h-8 mr-3" viewBox="0 0 60 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M60 12.5c0-6.904-5.596-12.5-12.5-12.5h-35C5.596 0 0 5.596 0 12.5S5.596 25 12.5 25h35C54.404 25 60 19.404 60 12.5z" fill="#fff" />
+                                    <path d="M59.5 12.5c0-6.628-5.372-12-12-12h-35c-6.628 0-12 5.372-12 12s5.372 12 12 12h35c6.628 0 12-5.372 12-12z" stroke="#E0E0E0" />
+                                </svg>
+                                <span className="text-lg">Pay securely with Stripe</span>
+                                <span className="ml-2 font-bold">${priceBreakdown.total.toFixed(2)}</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </main>
         </div>
     );
 };

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { ObjectId } from 'mongodb';
+import connectToDatabase from '@/lib/db';
+import Booking from '@/models/Booking';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 interface BookingRoom {
     id: number;
@@ -14,7 +16,6 @@ interface PaymentDetails {
 }
 
 interface BookingData {
-    userId: string;
     rooms: BookingRoom[];
     bookingType: 'daily' | 'monthly';
     totalAmount: number;
@@ -23,11 +24,21 @@ interface BookingData {
 
 export async function POST(req: Request) {
     try {
-        const { db } = await connectToDatabase();
+        // Connect to database and get user session
+        await connectToDatabase();
+        const session = await getServerSession(authOptions);
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: 'Unauthorized' },
+                { status: 401 }
+            );
+        }
+
         const bookingData: BookingData = await req.json();
 
         // Validate required fields
-        if (!bookingData.userId || !bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount || !bookingData.paymentDetails) {
+        if (!bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount || !bookingData.paymentDetails) {
             return NextResponse.json(
                 { error: 'Missing required booking information' },
                 { status: 400 }
@@ -35,69 +46,51 @@ export async function POST(req: Request) {
         }
 
         // Check for existing bookings to avoid conflicts
-        const existingBookings = await db.collection('bookings').find({
-            $or: bookingData.rooms.map((room: BookingRoom) => ({
+        for (const room of bookingData.rooms) {
+            const existingBookings = await Booking.find({
                 roomId: room.id.toString(),
-                date: { $in: room.dates.map((date: string) => new Date(date)) },
+                dates: { $in: room.dates },
                 timeSlot: room.timeSlot
-            }))
-        }).toArray();
+            });
 
-        if (existingBookings.length > 0) {
-            return NextResponse.json(
-                { error: 'Some dates are already booked for the selected rooms' },
-                { status: 409 }
-            );
+            if (existingBookings.length > 0) {
+                return NextResponse.json(
+                    {
+                        error: 'Some dates are already booked for the selected rooms',
+                        conflictingDates: existingBookings.map(b => ({
+                            date: b.dates[0],
+                            roomId: b.roomId
+                        }))
+                    },
+                    { status: 409 }
+                );
+            }
         }
 
-        // Calculate amount per booking
-        const totalBookings = bookingData.rooms.reduce((total: number, r: BookingRoom) => total + r.dates.length, 0);
-        const amountPerBooking = bookingData.totalAmount / totalBookings;
-
-        // Create booking records for each room and its dates
-        const bookingRecords = bookingData.rooms.flatMap((room: BookingRoom) =>
-            room.dates.map((date: string) => ({
-                userId: bookingData.userId,
+        // Create booking records for each room
+        const bookingPromises = bookingData.rooms.map(async (room) => {
+            const booking = new Booking({
+                userId: session.user.id,
                 roomId: room.id.toString(),
-                date: new Date(date),
+                dates: room.dates,
                 timeSlot: room.timeSlot,
-                bookingType: bookingData.bookingType,
-                amount: amountPerBooking,
-                paymentDetails: bookingData.paymentDetails,
-                createdAt: new Date()
-            }))
-        );
+                status: 'confirmed',
+                totalAmount: (bookingData.totalAmount / bookingData.rooms.length),
+                paymentDetails: bookingData.paymentDetails
+            });
+            return booking.save();
+        });
 
-        // Insert bookings
-        const result = await db.collection('bookings').insertMany(bookingRecords);
-
-        // Update user record with booking status
-        await db.collection('users').updateOne(
-            { _id: new ObjectId(bookingData.userId) },
-            {
-                $set: {
-                    hasBookings: true,
-                    lastBooking: new Date()
-                }
-            }
-        );
-
-        // Store booking data in Excel-like format
-        const bookingSummary = {
-            userId: bookingData.userId,
-            bookingIds: Object.values(result.insertedIds),
-            totalAmount: bookingData.totalAmount,
-            bookingType: bookingData.bookingType,
-            paymentDetails: bookingData.paymentDetails,
-            rooms: bookingData.rooms,
-            createdAt: new Date()
-        };
-
-        await db.collection('bookingSummaries').insertOne(bookingSummary);
+        // Save all bookings
+        const savedBookings = await Promise.all(bookingPromises);
 
         return NextResponse.json({
             success: true,
-            bookingIds: result.insertedIds,
+            bookings: savedBookings.map(booking => ({
+                _id: booking._id.toString(),
+                roomId: booking.roomId,
+                dates: booking.dates
+            })),
             message: 'Booking created successfully'
         });
     } catch (error) {

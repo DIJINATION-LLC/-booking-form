@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
+import connectToDatabase from '@/lib/db';
+import Booking from '@/models/Booking';
 
 export async function POST(req: Request) {
     try {
-        const { db } = await connectToDatabase();
+        await connectToDatabase();
         const { month, year, roomId } = await req.json();
 
         console.log('API received params:', { month, year, roomId }); // Debug log
@@ -12,50 +13,61 @@ export async function POST(req: Request) {
         const startDate = new Date(year, month - 1, 1);
         const endDate = new Date(year, month, 0);
 
+        // Format dates to match our string format (YYYY-MM-DD)
+        const startDateStr = startDate.toISOString().split('T')[0];
+        const endDateStr = endDate.toISOString().split('T')[0];
+
         // Find all bookings for the month and specific room if provided
         const query = {
-            date: {
-                $gte: startDate,
-                $lte: endDate
+            dates: {
+                $elemMatch: {
+                    $gte: startDateStr,
+                    $lte: endDateStr
+                }
             },
             ...(roomId && { roomId: roomId.toString() })
         };
 
         console.log('MongoDB query:', query); // Debug log
 
-        const bookings = await db.collection('bookings').find(query).toArray();
+        const bookings = await Booking.find(query).lean();
         console.log('Found bookings:', bookings); // Debug log
 
         // Create a map of dates and their booking status per room
         const bookingMap = new Map();
+
         bookings.forEach(booking => {
-            const dateStr = booking.date.toISOString().split('T')[0];
-            const key = `${dateStr}-${booking.roomId}`;
-            const currentStatus = bookingMap.get(key);
+            booking.dates.forEach(dateStr => {
+                // Only process dates within our target month
+                if (dateStr >= startDateStr && dateStr <= endDateStr) {
+                    const key = `${dateStr}-${booking.roomId}`;
+                    const currentStatus = bookingMap.get(key);
 
-            if (!currentStatus) {
-                bookingMap.set(key, {
-                    date: dateStr,
-                    roomId: booking.roomId,
-                    type: 'partial',
-                    timeSlots: [booking.timeSlot]
-                });
-            } else {
-                const timeSlots = currentStatus.timeSlots || [];
-                if (!timeSlots.includes(booking.timeSlot)) {
-                    timeSlots.push(booking.timeSlot);
+                    if (!currentStatus) {
+                        bookingMap.set(key, {
+                            date: dateStr,
+                            roomId: booking.roomId,
+                            type: 'partial',
+                            timeSlots: [booking.timeSlot]
+                        });
+                    } else {
+                        const timeSlots = currentStatus.timeSlots || [];
+                        if (!timeSlots.includes(booking.timeSlot)) {
+                            timeSlots.push(booking.timeSlot);
+                        }
+
+                        // If we have both morning and evening slots, or a full day booking
+                        const isFullyBooked = timeSlots.includes('full') ||
+                            (timeSlots.includes('morning') && timeSlots.includes('evening'));
+
+                        bookingMap.set(key, {
+                            ...currentStatus,
+                            type: isFullyBooked ? 'booked' : 'partial',
+                            timeSlots
+                        });
+                    }
                 }
-
-                // If we have both morning and evening slots, or a full day booking
-                const isFullyBooked = timeSlots.includes('full') ||
-                    (timeSlots.includes('morning') && timeSlots.includes('evening'));
-
-                bookingMap.set(key, {
-                    ...currentStatus,
-                    type: isFullyBooked ? 'booked' : 'partial',
-                    timeSlots
-                });
-            }
+            });
         });
 
         // Convert map to array of objects

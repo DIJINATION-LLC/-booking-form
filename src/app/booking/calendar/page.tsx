@@ -252,10 +252,16 @@ const CalendarPage: React.FC = () => {
         const room = selectedRooms.find(r => r.id === roomId);
         if (!room) return;
 
-        // Check for date conflicts
+        // Check for date conflicts with the new time slot
         const conflictingDates = room.dates?.filter(dateStr => {
             const date = new Date(dateStr);
             return !isTimeSlotAvailable(date, roomId, timeSlot);
+        }) || [];
+
+        // Keep track of compatible dates
+        const compatibleDates = room.dates?.filter(dateStr => {
+            const date = new Date(dateStr);
+            return isTimeSlotAvailable(date, roomId, timeSlot);
         }) || [];
 
         if (conflictingDates.length > 0) {
@@ -268,26 +274,51 @@ const CalendarPage: React.FC = () => {
                 })
             ).join(', ');
 
-            toast.error(
-                <div>
-                    <p>Cannot switch to {timeSlot === 'full' ? 'Full Day' : timeSlot === 'morning' ? 'Morning' : 'Evening'} slot.</p>
-                    <p className="text-sm mt-1">Please unselect these dates first: {formattedDates}</p>
-                </div>,
-                { duration: 5000 }
-            );
-            return;
+            if (compatibleDates.length > 0) {
+                // Some dates are compatible, some aren't
+                toast.error(
+                    <div>
+                        <p>Some dates are not available for {timeSlot === 'full' ? 'Full Day' : timeSlot === 'morning' ? 'Morning' : 'Evening'} slot.</p>
+                        <p className="text-sm mt-1">Incompatible dates: {formattedDates}</p>
+                        <p className="text-sm mt-1">Compatible dates will be preserved.</p>
+                    </div>,
+                    { duration: 5000 }
+                );
+            } else {
+                // No dates are compatible
+                toast.error(
+                    <div>
+                        <p>Cannot switch to {timeSlot === 'full' ? 'Full Day' : timeSlot === 'morning' ? 'Morning' : 'Evening'} slot.</p>
+                        <p className="text-sm mt-1">Please unselect these dates first: {formattedDates}</p>
+                    </div>,
+                    { duration: 5000 }
+                );
+                return;
+            }
         }
 
         setSelectedRooms(prev =>
             prev.map(r => {
                 if (r.id === roomId) {
-                    return { ...r, timeSlot, dates: [] };
+                    return {
+                        ...r,
+                        timeSlot,
+                        // Keep compatible dates, remove conflicting ones
+                        dates: compatibleDates
+                    };
                 }
                 return r;
             })
         );
 
-        toast.success(`Switched to ${timeSlot === 'full' ? 'Full Day' : timeSlot === 'morning' ? 'Morning' : 'Evening'} slot`);
+        const timeSlotText = timeSlot === 'full' ? 'Full Day' : timeSlot === 'morning' ? 'Morning' : 'Evening';
+        if (compatibleDates.length === room.dates?.length) {
+            toast.success(`Switched to ${timeSlotText} slot`);
+        } else if (compatibleDates.length > 0) {
+            toast.success(`Switched to ${timeSlotText} slot. Compatible dates have been preserved.`);
+        } else {
+            toast.success(`Switched to ${timeSlotText} slot. Previous dates were cleared.`);
+        }
 
         // Save to localStorage
         localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));

@@ -37,6 +37,12 @@ const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => 
         setError(null);
 
         try {
+            // First, trigger form validation and submission
+            const { error: submitError } = await elements.submit();
+            if (submitError) {
+                throw new Error(submitError.message);
+            }
+
             // Get payment intent client secret
             const response = await fetch('/api/create-payment-intent', {
                 method: 'POST',

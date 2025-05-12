@@ -37,6 +37,7 @@ interface StoredRoomBooking extends Omit<RoomBooking, 'dates'> {
 
 const CalendarPage: React.FC = () => {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [bookingType, setBookingType] = useState<'daily' | 'monthly'>('daily');
     const [showTimeSlots, setShowTimeSlots] = useState(false);
@@ -47,20 +48,15 @@ const CalendarPage: React.FC = () => {
     const [showHalfDayOptions, setShowHalfDayOptions] = useState(false);
 
     useEffect(() => {
-        // Check authentication using localStorage
-        const user = localStorage.getItem('user');
-        if (!user) {
+        if (status === 'unauthenticated') {
             toast.error('Please login to continue');
-            router.push('/');
+            router.push('/login?callbackUrl=/booking/calendar');
             return;
         }
 
-        // Set user data
-        setUserData(JSON.parse(user));
-
-        // Get stored booking data
-        const storedRooms = localStorage.getItem('selectedRooms');
-        const storedBookingType = localStorage.getItem('bookingType');
+        // Get stored booking data from sessionStorage
+        const storedRooms = sessionStorage.getItem('selectedRooms');
+        const storedBookingType = sessionStorage.getItem('bookingType');
 
         if (!storedRooms || !storedBookingType) {
             toast.error('Please select rooms before proceeding to calendar');
@@ -76,14 +72,12 @@ const CalendarPage: React.FC = () => {
             console.error('Error parsing stored data:', error);
             toast.error('Error loading booking data');
             router.push('/booking');
-            return;
         }
-    }, [router]);
+    }, [status, router]);
 
     // Add new useEffect to fetch booking status when month or selected rooms change
     useEffect(() => {
         if (selectedRooms.length > 0) {
-            console.log('Fetching booking status for rooms:', selectedRooms);
             fetchBookingStatus();
         }
     }, [currentMonth, selectedRooms, bookingType]);
@@ -104,29 +98,48 @@ const CalendarPage: React.FC = () => {
     const fetchBookingStatus = async () => {
         try {
             // Fetch booking status for each selected room
-            const promises = selectedRooms.map(room => {
-                const roomId = room.id.toString(); // Convert to string consistently
-                return fetch('/api/bookings/status', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        month: currentMonth.getMonth() + 1,
-                        year: currentMonth.getFullYear(),
-                        roomId
-                    }),
-                }).then(res => res.json())
+            const promises = selectedRooms.map(async room => {
+                try {
+                    const roomId = room.id.toString();
+                    const response = await fetch('/api/bookings/status', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            month: currentMonth.getMonth() + 1,
+                            year: currentMonth.getFullYear(),
+                            roomId
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch booking status for room ${roomId}`);
+                    }
+
+                    const data = await response.json();
+                    return Array.isArray(data.bookings) ? data.bookings : [];
+                } catch (error) {
+                    console.error(`Error fetching status for room ${room.id}:`, error);
+                    return [];
+                }
             });
 
             const results = await Promise.all(promises);
-            console.log('Booking status results:', results);
-            const allBookings = results.flatMap(result => result.bookings);
-            console.log('All bookings:', allBookings);
+            const allBookings = results.flat().filter(booking =>
+                booking &&
+                typeof booking === 'object' &&
+                'date' in booking &&
+                'roomId' in booking &&
+                'timeSlots' in booking &&
+                Array.isArray(booking.timeSlots)
+            );
+
             setBookingStatus(allBookings);
         } catch (error) {
             console.error('Failed to fetch booking status:', error);
             toast.error('Failed to load booking availability');
+            setBookingStatus([]);
         }
     };
 
@@ -144,6 +157,8 @@ const CalendarPage: React.FC = () => {
     };
 
     const handleDateSelection = (date: Date, roomId: number) => {
+        if (!date) return;
+
         // Ensure consistent time by setting to noon
         const normalizedDate = new Date(date);
         normalizedDate.setHours(12, 0, 0, 0);
@@ -231,9 +246,9 @@ const CalendarPage: React.FC = () => {
             );
         }
 
-        // Save to localStorage
-        localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
-        localStorage.setItem('bookingType', bookingType);
+        // Save to sessionStorage
+        sessionStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
+        sessionStorage.setItem('bookingType', bookingType);
     };
 
     // Helper function to format display date
@@ -324,31 +339,46 @@ const CalendarPage: React.FC = () => {
         localStorage.setItem('selectedRooms', JSON.stringify(selectedRooms));
     };
 
-    const isTimeSlotAvailable = (date: Date, roomId: number, timeSlot: TimeSlot): boolean => {
-        const dateStr = date.toISOString().split('T')[0];
-        const status = bookingStatus.find(b =>
-            b.date === dateStr &&
-            b.roomId === roomId.toString()
-        );
+    const isTimeSlotAvailable = (date: Date | null, roomId: number, timeSlot: TimeSlot): boolean => {
+        if (!date) return false;
 
-        // If no booking status found, all slots are available
-        if (!status) return true;
+        try {
+            const dateStr = date.toISOString().split('T')[0];
+            const roomIdStr = roomId.toString();
 
-        // If full day is booked, no slots are available
-        if (status.timeSlots.includes('full')) return false;
+            // Ensure bookingStatus is an array and contains valid entries
+            if (!Array.isArray(bookingStatus)) return true;
 
-        switch (timeSlot) {
-            case 'full':
-                // For full day booking, both morning and evening must be free
-                return !status.timeSlots.includes('morning') && !status.timeSlots.includes('evening');
-            case 'morning':
-                // For morning booking, only morning slot must be free
-                return !status.timeSlots.includes('morning') && !status.timeSlots.includes('full');
-            case 'evening':
-                // For evening booking, only evening slot must be free
-                return !status.timeSlots.includes('evening') && !status.timeSlots.includes('full');
-            default:
-                return false;
+            const status = bookingStatus.find(b =>
+                b &&
+                typeof b === 'object' &&
+                'date' in b &&
+                'roomId' in b &&
+                b.date === dateStr &&
+                b.roomId === roomIdStr
+            );
+
+            if (!status || !Array.isArray(status.timeSlots)) return true;
+
+            // If full day is booked, no slots are available
+            if (status.timeSlots.includes('full')) return false;
+
+            switch (timeSlot) {
+                case 'full':
+                    // For full day booking, both morning and evening must be free
+                    return !status.timeSlots.includes('morning') && !status.timeSlots.includes('evening');
+                case 'morning':
+                    // For morning booking, only morning slot must be free
+                    return !status.timeSlots.includes('morning') && !status.timeSlots.includes('full');
+                case 'evening':
+                    // For evening booking, only evening slot must be free
+                    return !status.timeSlots.includes('evening') && !status.timeSlots.includes('full');
+                default:
+                    return false;
+            }
+        } catch (error) {
+            console.error('Error checking time slot availability:', error);
+            return false;
         }
     };
 
@@ -448,7 +478,9 @@ const CalendarPage: React.FC = () => {
         setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1));
     };
 
-    const isDateBooked = (date: Date, roomId: number, timeSlot: TimeSlot): boolean => {
+    const isDateBooked = (date: Date | null, roomId: number, timeSlot: TimeSlot): boolean => {
+        if (!date) return false;
+
         const dateStr = date.toISOString().split('T')[0];
         const roomIdStr = roomId.toString();
         const status = bookingStatus.find(b => b.date === dateStr && b.roomId === roomIdStr);
@@ -551,7 +583,7 @@ const CalendarPage: React.FC = () => {
     };
 
     const handleProceed = async () => {
-        if (!userData) {
+        if (!session) {
             toast.error('Please login to continue');
             router.push('/');
             return;
@@ -569,7 +601,6 @@ const CalendarPage: React.FC = () => {
         }
 
         try {
-            // Prepare booking data
             const bookingData = {
                 rooms: selectedRooms.map(room => ({
                     id: room.id,
@@ -580,12 +611,10 @@ const CalendarPage: React.FC = () => {
                 totalAmount: calculatePrice().total
             };
 
-            // Store booking data in localStorage for the summary page
-            localStorage.setItem('bookingData', JSON.stringify(bookingData));
-
-            // Clear selected rooms from localStorage since we're moving to summary
-            localStorage.removeItem('selectedRooms');
-            localStorage.removeItem('bookingType');
+            // Store in sessionStorage
+            sessionStorage.setItem('bookingData', JSON.stringify(bookingData));
+            sessionStorage.removeItem('selectedRooms');
+            sessionStorage.removeItem('bookingType');
 
             toast.success('Proceeding to booking summary...');
             router.push('/booking/summary');
@@ -685,20 +714,17 @@ const CalendarPage: React.FC = () => {
     };
 
     // Show loading state while checking authentication
-    if (!userData) {
+    if (status === 'loading') {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
-                {/* Header */}
-                <header className="sticky top-0 left-0 right-0 z-50 bg-white shadow-md">
-                    <Header />
-                </header>
-
-                {/* Loading Spinner */}
-                <main className="flex items-center justify-center min-h-[calc(100vh-80px)]">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-                </main>
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
             </div>
         );
+    }
+
+    // If not authenticated, the useEffect will handle redirection
+    if (status === 'unauthenticated') {
+        return null;
     }
 
     return (

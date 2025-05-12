@@ -1,119 +1,138 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Header from '@/components/Header';
+import React, { useState, useEffect } from 'react';
+import { signIn, useSession } from 'next-auth/react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 
-const LoginPage = () => {
+export default function LoginPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const { data: session, status } = useSession();
     const [isLoading, setIsLoading] = useState(false);
     const [formData, setFormData] = useState({
         email: '',
         password: ''
     });
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
-    };
+    useEffect(() => {
+        if (status === 'authenticated' && session) {
+            const callbackUrl = searchParams?.get('callbackUrl') || '/booking';
+            router.push(callbackUrl);
+        }
+    }, [session, status, router, searchParams]);
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
+        const loadingToast = toast.loading('Signing in...');
 
         try {
-            const response = await fetch('/api/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(formData),
+            const result = await signIn('credentials', {
+                email: formData.email.toLowerCase(),
+                password: formData.password,
+                redirect: false
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.message || 'Login failed');
+            if (result?.error) {
+                toast.dismiss(loadingToast);
+                toast.error(result.error);
+            } else {
+                toast.dismiss(loadingToast);
+                toast.success('Login successful!');
+                // NextAuth will handle the redirect in the useEffect above
             }
-
-            // Store user data in localStorage
-            localStorage.setItem('user', JSON.stringify(data.user));
-            toast.success('Login successful!');
-            router.push('/booking');
         } catch (error) {
-            console.error('Login error:', error);
-            toast.error(error instanceof Error ? error.message : 'Login failed');
+            toast.dismiss(loadingToast);
+            toast.error('Login failed. Please try again.');
         } finally {
             setIsLoading(false);
         }
     };
 
+    // If already authenticated, show loading state
+    if (status === 'loading' || (status === 'authenticated' && session)) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
+
     return (
-        <div className="min-h-screen bg-gray-50">
-            <Header />
-            <div className="flex items-center justify-center min-h-screen pt-16">
-                <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
-                    <h2 className="text-2xl font-bold text-center mb-6">Login to Hire a Clinic</h2>
-                    <form onSubmit={handleLogin} className="space-y-4">
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-md w-full space-y-8">
+                <div>
+                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+                        Sign in to your account
+                    </h2>
+                    <p className="mt-2 text-center text-sm text-gray-600">
+                        Or{' '}
+                        <button
+                            onClick={() => router.push('/register')}
+                            className="font-medium text-blue-600 hover:text-blue-500"
+                        >
+                            create a new account
+                        </button>
+                    </p>
+                </div>
+                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+                    <div className="rounded-md shadow-sm -space-y-px">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Email</label>
+                            <label htmlFor="email" className="sr-only">
+                                Email address
+                            </label>
                             <input
-                                type="email"
+                                id="email"
                                 name="email"
-                                value={formData.email}
-                                onChange={handleChange}
-                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                placeholder="Enter your email"
+                                type="email"
+                                autoComplete="email"
                                 required
+                                value={formData.email}
+                                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                placeholder="Email address"
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Password</label>
+                            <label htmlFor="password" className="sr-only">
+                                Password
+                            </label>
                             <input
-                                type="password"
+                                id="password"
                                 name="password"
-                                value={formData.password}
-                                onChange={handleChange}
-                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                placeholder="Enter your password"
+                                type="password"
+                                autoComplete="current-password"
                                 required
+                                value={formData.password}
+                                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                placeholder="Password"
                             />
                         </div>
+                    </div>
+
+                    <div>
                         <button
                             type="submit"
                             disabled={isLoading}
-                            className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${isLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                                } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500`}
+                            className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                             {isLoading ? (
-                                <div className="flex items-center">
-                                    <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
-                                    Logging in...
-                                </div>
+                                <span className="flex items-center">
+                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Signing in...
+                                </span>
                             ) : (
-                                'Login'
+                                'Sign in'
                             )}
                         </button>
-                    </form>
-                    <div className="mt-4 text-center">
-                        <p className="text-sm text-gray-600">
-                            Don't have an account?{' '}
-                            <button
-                                onClick={() => router.push('/register')}
-                                className="text-blue-600 hover:text-blue-800"
-                            >
-                                Register here
-                            </button>
-                        </p>
                     </div>
-                </div>
+                </form>
             </div>
         </div>
     );
-};
-
-export default LoginPage; 
+} 

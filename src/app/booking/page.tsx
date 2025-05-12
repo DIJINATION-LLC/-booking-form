@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import Header from '@/components/Header';
 
@@ -18,52 +19,47 @@ interface Room {
 
 const BookingOptions = () => {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [selectedOption, setSelectedOption] = useState<'daily' | 'monthly'>('daily');
     const [rooms, setRooms] = useState<Room[]>([
         {
             id: 1,
-            name: 'Room 1',
-            image: '/images/room1.png',
-            description: 'Modern examination room with medical bed, sink, and essential equipment. Features skeletal system chart and bright lighting.',
+            name: 'Consultation Room 1',
+            image: '/images/room1.jpg',
+            description: 'Spacious consultation room with modern medical equipment',
             selected: false,
             timeSlot: 'full'
         },
         {
             id: 2,
-            name: 'Room 2',
-            image: '/images/room2.png',
-            description: 'Well-equipped treatment room with examination table, medical charts, and modern amenities. Perfect for patient consultations.',
+            name: 'Consultation Room 2',
+            image: '/images/room2.jpg',
+            description: 'Well-lit examination room with patient comfort in mind',
             selected: false,
             timeSlot: 'full'
         },
         {
             id: 3,
-            name: 'Room 3',
-            image: '/images/room3.png',
-            description: 'Spacious procedure room with large windows, built-in cabinets, and sink. Excellent natural lighting and modern fixtures.',
+            name: 'Consultation Room 3',
+            image: '/images/room3.jpg',
+            description: 'Private consultation space with state-of-the-art facilities',
             selected: false,
             timeSlot: 'full'
         }
     ]);
 
-    // Add authentication check
-    React.useEffect(() => {
-        const user = localStorage.getItem('user');
-        if (!user) {
+    useEffect(() => {
+        if (status === 'unauthenticated') {
             toast.error('Please login to continue');
-            router.push('/');
+            router.push('/login?callbackUrl=/booking');
         }
-    }, [router]);
+    }, [status, router]);
 
     const handleRoomSelect = (roomId: number) => {
         setRooms(rooms.map(room => {
             if (room.id === roomId) {
                 const newSelected = !room.selected;
-                if (newSelected) {
-                    toast.success(`${room.name} selected`);
-                } else {
-                    toast.error(`${room.name} deselected`);
-                }
+                toast.success(`${room.name} ${newSelected ? 'selected' : 'unselected'}`);
                 return { ...room, selected: newSelected };
             }
             return room;
@@ -86,15 +82,12 @@ const BookingOptions = () => {
     };
 
     const handleContinue = () => {
-        // Check authentication
-        const user = localStorage.getItem('user');
-        if (!user) {
+        if (status !== 'authenticated' || !session) {
             toast.error('Please login to continue');
-            router.push('/');
+            router.push('/login?callbackUrl=/booking');
             return;
         }
 
-        // Validate room selection
         const selectedRooms = rooms.filter(r => r.selected);
         if (selectedRooms.length === 0) {
             toast.error('Please select at least one room');
@@ -102,16 +95,15 @@ const BookingOptions = () => {
         }
 
         try {
-            // Add dates array to each selected room before storing and set default time slot to full
             const roomsWithDates = selectedRooms.map(room => ({
                 ...room,
                 dates: [],
-                timeSlot: 'full'
+                timeSlot: room.timeSlot
             }));
 
-            // Store booking data
-            localStorage.setItem('bookingType', selectedOption);
-            localStorage.setItem('selectedRooms', JSON.stringify(roomsWithDates));
+            // Store in sessionStorage
+            sessionStorage.setItem('bookingType', selectedOption);
+            sessionStorage.setItem('selectedRooms', JSON.stringify(roomsWithDates));
 
             toast.success('Proceeding to calendar...');
             router.push('/booking/calendar');
@@ -125,12 +117,25 @@ const BookingOptions = () => {
         router.back();
     };
 
+    // Show loading state while checking authentication
+    if (status === 'loading') {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
+
+    // If not authenticated, the useEffect will handle redirection
+    if (status === 'unauthenticated') {
+        return null;
+    }
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
             <Header />
             <div className="container mx-auto px-4 pt-20">
                 <div className="max-w-6xl mx-auto">
-                    {/* Back Button */}
                     <button
                         onClick={handleBack}
                         className="mb-6 flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200"

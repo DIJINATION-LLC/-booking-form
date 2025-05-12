@@ -22,6 +22,11 @@ interface PriceBreakdown {
     total: number;
 }
 
+interface PaymentResponse {
+    clientSecret: string;
+    bookingIds: string[];
+}
+
 const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => {
     const stripe = useStripe();
     const elements = useElements();
@@ -37,31 +42,44 @@ const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => 
         setError(null);
 
         try {
+            // Get booking data from localStorage
+            const bookingData = localStorage.getItem('bookingData');
+            if (!bookingData) {
+                throw new Error('No booking data found');
+            }
+
+            const parsedBookingData = JSON.parse(bookingData);
+
             // First, trigger form validation and submission
             const { error: submitError } = await elements.submit();
             if (submitError) {
                 throw new Error(submitError.message);
             }
 
-            // Get payment intent client secret
-            const response = await fetch('/api/create-payment-intent', {
+            // Create payment intent with booking data
+            const response = await fetch('/api/payment/intent', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     amount: priceBreakdown.total * 100, // Convert to cents
+                    bookingData: parsedBookingData
                 }),
             });
 
             if (!response.ok) {
-                throw new Error('Failed to create payment intent');
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to create payment intent');
             }
 
-            const { clientSecret } = await response.json();
+            const { clientSecret, bookingIds } = await response.json() as PaymentResponse;
+
+            // Store booking IDs for confirmation
+            localStorage.setItem('pendingBookingIds', JSON.stringify(bookingIds));
 
             // Confirm the payment
-            const { error: paymentError, paymentIntent } = await stripe.confirmPayment({
+            const result = await stripe.confirmPayment({
                 elements,
                 clientSecret,
                 confirmParams: {
@@ -69,18 +87,12 @@ const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => 
                 },
             });
 
-            if (paymentError) {
-                throw new Error(paymentError.message);
+            if (result.error) {
+                throw new Error(result.error.message);
             }
 
-            if (paymentIntent.status === 'succeeded') {
-                // Store confirmation data
-                const bookingData = localStorage.getItem('bookingData');
-                if (bookingData) {
-                    localStorage.setItem('confirmationData', bookingData);
-                }
-                router.push('/booking/confirmation');
-            }
+            // If we get here, it means the payment was successful
+            router.push('/booking/confirmation');
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Payment failed';
             setError(errorMessage);
@@ -120,6 +132,7 @@ const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => 
 const PaymentPage = () => {
     const router = useRouter();
     const [clientSecret, setClientSecret] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
     const [priceBreakdown, setPriceBreakdown] = useState<PriceBreakdown>({
         subtotal: 0,
         tax: 0,
@@ -138,6 +151,16 @@ const PaymentPage = () => {
 
         try {
             const parsedData = JSON.parse(bookingData);
+
+            // Validate booking data
+            if (!parsedData.rooms || !Array.isArray(parsedData.rooms) || parsedData.rooms.length === 0) {
+                throw new Error('Invalid booking data: No rooms selected');
+            }
+
+            if (!parsedData.totalAmount || parsedData.totalAmount <= 0) {
+                throw new Error('Invalid booking data: Invalid amount');
+            }
+
             setPriceBreakdown({
                 subtotal: parsedData.totalAmount * 0.93, // Remove tax and deposit
                 tax: parsedData.totalAmount * 0.035,
@@ -145,31 +168,62 @@ const PaymentPage = () => {
                 total: parsedData.totalAmount
             });
 
-            // Create payment intent
-            fetch('/api/create-payment-intent', {
+            // Create initial payment intent
+            console.log('Attempting to create payment intent with data:', {
+                amount: parsedData.totalAmount * 100,
+                rooms: parsedData.rooms.length,
+                bookingType: parsedData.bookingType
+            });
+
+            fetch('/api/payment/intent', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     amount: parsedData.totalAmount * 100, // Convert to cents
+                    bookingData: parsedData
                 }),
             })
-                .then(response => response.json())
-                .then(data => {
+                .then(async response => {
+                    console.log('Payment intent response status:', response.status);
+                    const data = await response.json();
+                    console.log('Payment intent response data:', data);
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to initialize payment');
+                    }
+                    return data;
+                })
+                .then((data: PaymentResponse) => {
+                    console.log('Successfully created payment intent');
                     setClientSecret(data.clientSecret);
+                    localStorage.setItem('pendingBookingIds', JSON.stringify(data.bookingIds));
+                    setError(null); // Clear any previous errors
                 })
                 .catch(error => {
-                    console.error('Error creating payment intent:', error);
-                    toast.error('Failed to initialize payment');
-                    router.push('/booking');
+                    console.error('Detailed payment intent error:', {
+                        message: error.message,
+                        name: error.name,
+                        stack: error.stack
+                    });
+                    const errorMessage = error instanceof Error ? error.message : 'Failed to initialize payment';
+                    setError(errorMessage);
+                    toast.error(errorMessage);
                 });
         } catch (error) {
-            console.error('Error parsing booking data:', error);
-            toast.error('Invalid booking data');
+            console.error('Error processing booking data:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Invalid booking data';
+            toast.error(errorMessage);
             router.push('/booking');
         }
     }, [router]);
+
+    const handleBackClick = () => {
+        // Clear any error state before going back
+        setError(null);
+        router.back();
+    };
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
@@ -182,7 +236,7 @@ const PaymentPage = () => {
             <main className="container mx-auto px-4 py-8">
                 <div className="max-w-4xl mx-auto">
                     <button
-                        onClick={() => router.back()}
+                        onClick={handleBackClick}
                         className="mb-6 flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -193,6 +247,13 @@ const PaymentPage = () => {
 
                     <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
                         <h1 className="text-3xl font-bold text-gray-800 mb-8">Payment Details</h1>
+
+                        {error && (
+                            <div className="mb-6 bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+                                <strong className="font-bold">Error: </strong>
+                                <span className="block sm:inline">{error}</span>
+                            </div>
+                        )}
 
                         {/* Price Summary */}
                         <div className="mb-8">
@@ -227,6 +288,15 @@ const PaymentPage = () => {
                             <Elements stripe={stripePromise} options={{ clientSecret }}>
                                 <PaymentForm priceBreakdown={priceBreakdown} />
                             </Elements>
+                        ) : error ? (
+                            <div className="text-center py-4">
+                                <button
+                                    onClick={() => window.location.reload()}
+                                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors duration-200"
+                                >
+                                    Try Again
+                                </button>
+                            </div>
                         ) : (
                             <div className="flex justify-center py-8">
                                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>

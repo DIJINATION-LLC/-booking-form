@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import connectToDatabase from '@/lib/db';
-import Booking from '@/models/Booking';
+import { connectToDatabase } from '@/lib/mongodb';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
@@ -17,7 +16,7 @@ interface PaymentDetails {
 
 interface BookingData {
     rooms: BookingRoom[];
-    bookingType: 'daily' | 'monthly';
+    bookingType: string;
     totalAmount: number;
     paymentDetails: PaymentDetails;
 }
@@ -25,7 +24,7 @@ interface BookingData {
 export async function POST(req: Request) {
     try {
         // Connect to database and get user session
-        await connectToDatabase();
+        const { db } = await connectToDatabase();
         const session = await getServerSession(authOptions);
 
         if (!session?.user?.id) {
@@ -47,11 +46,11 @@ export async function POST(req: Request) {
 
         // Check for existing bookings to avoid conflicts
         for (const room of bookingData.rooms) {
-            const existingBookings = await Booking.find({
+            const existingBookings = await db.collection('bookings').find({
                 roomId: room.id.toString(),
                 dates: { $in: room.dates },
                 timeSlot: room.timeSlot
-            });
+            }).toArray();
 
             if (existingBookings.length > 0) {
                 return NextResponse.json(
@@ -67,36 +66,31 @@ export async function POST(req: Request) {
             }
         }
 
-        // Create booking records for each room
-        const bookingPromises = bookingData.rooms.map(async (room) => {
-            const booking = new Booking({
+        // Create bookings for each room
+        const bookingPromises = bookingData.rooms.map(room => {
+            return db.collection('bookings').insertOne({
                 userId: session.user.id,
                 roomId: room.id.toString(),
                 dates: room.dates,
                 timeSlot: room.timeSlot,
                 status: 'confirmed',
-                totalAmount: (bookingData.totalAmount / bookingData.rooms.length),
-                paymentDetails: bookingData.paymentDetails
+                totalAmount: bookingData.totalAmount,
+                paymentDetails: bookingData.paymentDetails,
+                createdAt: new Date(),
+                updatedAt: new Date()
             });
-            return booking.save();
         });
 
-        // Save all bookings
-        const savedBookings = await Promise.all(bookingPromises);
+        const results = await Promise.all(bookingPromises);
 
         return NextResponse.json({
-            success: true,
-            bookings: savedBookings.map(booking => ({
-                _id: booking._id.toString(),
-                roomId: booking.roomId,
-                dates: booking.dates
-            })),
-            message: 'Booking created successfully'
+            message: 'Bookings created successfully',
+            bookingIds: results.map(r => r.insertedId.toString())
         });
     } catch (error) {
-        console.error('Failed to create booking:', error);
+        console.error('Error creating bookings:', error);
         return NextResponse.json(
-            { error: 'Failed to create booking' },
+            { error: 'Failed to create bookings' },
             { status: 500 }
         );
     }

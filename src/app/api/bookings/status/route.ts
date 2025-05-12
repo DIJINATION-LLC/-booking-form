@@ -1,13 +1,31 @@
 import { NextResponse } from 'next/server';
-import connectToDatabase from '@/lib/db';
-import Booking from '@/models/Booking';
+import { connectToDatabase } from '@/lib/mongodb';
+import { Document, WithId } from 'mongodb';
+
+interface BookingStatus {
+    date: string;
+    roomId: string;
+    type: 'none' | 'booked' | 'partial';
+    timeSlots: Array<'full' | 'morning' | 'evening'>;
+}
+
+interface Booking {
+    dates: string[];
+    roomId: string;
+    timeSlot: 'full' | 'morning' | 'evening';
+}
 
 export async function POST(req: Request) {
     try {
-        await connectToDatabase();
+        const { db } = await connectToDatabase();
         const { month, year, roomId } = await req.json();
 
-        console.log('API received params:', { month, year, roomId }); // Debug log
+        if (!month || !year) {
+            return NextResponse.json(
+                { error: 'Month and year are required' },
+                { status: 400 }
+            );
+        }
 
         // Get start and end dates for the month
         const startDate = new Date(year, month - 1, 1);
@@ -28,57 +46,35 @@ export async function POST(req: Request) {
             ...(roomId && { roomId: roomId.toString() })
         };
 
-        console.log('MongoDB query:', query); // Debug log
-
-        const bookings = await Booking.find(query).lean();
-        console.log('Found bookings:', bookings); // Debug log
+        const bookings = await db.collection('bookings')
+            .find(query)
+            .toArray() as WithId<Document & Booking>[];
 
         // Create a map of dates and their booking status per room
-        const bookingMap = new Map();
+        const bookingMap = new Map<string, BookingStatus>();
 
-        bookings.forEach(booking => {
-            booking.dates.forEach(dateStr => {
-                // Only process dates within our target month
-                if (dateStr >= startDateStr && dateStr <= endDateStr) {
-                    const key = `${dateStr}-${booking.roomId}`;
-                    const currentStatus = bookingMap.get(key);
-
-                    if (!currentStatus) {
-                        bookingMap.set(key, {
-                            date: dateStr,
-                            roomId: booking.roomId,
-                            type: 'partial',
-                            timeSlots: [booking.timeSlot]
-                        });
-                    } else {
-                        const timeSlots = currentStatus.timeSlots || [];
-                        if (!timeSlots.includes(booking.timeSlot)) {
-                            timeSlots.push(booking.timeSlot);
-                        }
-
-                        // If we have both morning and evening slots, or a full day booking
-                        const isFullyBooked = timeSlots.includes('full') ||
-                            (timeSlots.includes('morning') && timeSlots.includes('evening'));
-
-                        bookingMap.set(key, {
-                            ...currentStatus,
-                            type: isFullyBooked ? 'booked' : 'partial',
-                            timeSlots
-                        });
-                    }
+        bookings.forEach((booking) => {
+            booking.dates.forEach((date: string) => {
+                const key = `${date}-${booking.roomId}`;
+                if (!bookingMap.has(key)) {
+                    bookingMap.set(key, {
+                        date,
+                        roomId: booking.roomId,
+                        type: 'none',
+                        timeSlots: []
+                    });
                 }
+                const status = bookingMap.get(key)!;
+                status.timeSlots.push(booking.timeSlot);
+                status.type = status.timeSlots.includes('full') ? 'booked' : 'partial';
             });
         });
 
-        // Convert map to array of objects
-        const bookingStatus = Array.from(bookingMap.values());
-        console.log('Final booking status:', bookingStatus); // Debug log
-
-        return NextResponse.json({ bookings: bookingStatus });
+        return NextResponse.json(Array.from(bookingMap.values()));
     } catch (error) {
         console.error('Error fetching booking status:', error);
         return NextResponse.json(
-            { error: 'Error fetching booking status' },
+            { error: 'Failed to fetch booking status' },
             { status: 500 }
         );
     }

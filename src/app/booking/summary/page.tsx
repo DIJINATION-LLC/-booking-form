@@ -34,19 +34,17 @@ const calculatePriceBreakdown = (rooms: Room[], type: BookingType): PriceBreakdo
     let securityDeposit = 0;
 
     rooms.forEach(room => {
-        const numberOfDays = room.dates.length;
-        if (numberOfDays === 0) return;
+        if (room.dates.length === 0) return;
 
         const basePrice = PRICING[type][room.timeSlot];
 
         if (type === 'daily') {
-            subtotal += basePrice * numberOfDays;
+            subtotal += basePrice * room.dates.length;
         } else {
             subtotal += basePrice;
         }
     });
 
-    // Add security deposit only once if there are any rooms with dates
     if (rooms.some(room => room.dates.length > 0)) {
         securityDeposit = PRICING.securityDeposit;
     }
@@ -76,15 +74,13 @@ const SummaryPage = () => {
     });
 
     useEffect(() => {
-        // Check authentication
         if (status === 'unauthenticated') {
             toast.error('Please login to continue');
             router.push('/login?callbackUrl=/booking/summary');
             return;
         }
 
-        // Get booking data
-        const bookingDataStr = localStorage.getItem('bookingData');
+        const bookingDataStr = sessionStorage.getItem('bookingData');
         if (!bookingDataStr) {
             toast.error('No booking details found');
             router.push('/booking');
@@ -99,12 +95,11 @@ const SummaryPage = () => {
             const priceBreakdownData = calculatePriceBreakdown(bookingData.rooms, bookingData.bookingType);
             setPriceBreakdown(priceBreakdownData);
 
-            // Update localStorage with total amount
             const updatedBookingData = {
                 ...bookingData,
                 totalAmount: priceBreakdownData.total
             };
-            localStorage.setItem('bookingData', JSON.stringify(updatedBookingData));
+            sessionStorage.setItem('bookingData', JSON.stringify(updatedBookingData));
         } catch (error) {
             console.error('Error parsing booking data:', error);
             toast.error('Invalid booking data');
@@ -138,13 +133,12 @@ const SummaryPage = () => {
         const newPriceBreakdown = calculatePriceBreakdown(updatedRooms, bookingType);
         setPriceBreakdown(newPriceBreakdown);
 
-        // Update localStorage with total amount
         const bookingData = {
             rooms: updatedRooms,
             bookingType,
             totalAmount: newPriceBreakdown.total
         };
-        localStorage.setItem('bookingData', JSON.stringify(bookingData));
+        sessionStorage.setItem('bookingData', JSON.stringify(bookingData));
         toast.success('Date removed successfully');
     };
 
@@ -163,14 +157,13 @@ const SummaryPage = () => {
         try {
             setIsProcessing(true);
 
-            // Create payment intent with properly structured data
             const response = await fetch('/api/create-payment-intent', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    amount: Math.round(priceBreakdown.total * 100), // Convert to cents for Stripe
+                    amount: Math.round(priceBreakdown.total * 100),
                     bookingData: {
                         rooms: selectedRooms,
                         bookingType,
@@ -186,20 +179,17 @@ const SummaryPage = () => {
 
             const { clientSecret } = await response.json();
 
-            // Store booking data for confirmation
-            localStorage.setItem('confirmationData', JSON.stringify({
+            sessionStorage.setItem('confirmationData', JSON.stringify({
                 rooms: selectedRooms,
                 bookingType,
                 priceBreakdown,
                 clientSecret
             }));
 
-            // Store client secret for payment page
-            localStorage.setItem('paymentIntent', JSON.stringify({
+            sessionStorage.setItem('paymentIntent', JSON.stringify({
                 clientSecret
             }));
 
-            // Redirect to payment page
             router.push('/booking/payment');
         } catch (error) {
             console.error('Payment setup error:', error);
@@ -234,7 +224,6 @@ const SummaryPage = () => {
                     <div className="bg-white rounded-2xl shadow-xl p-8">
                         <h1 className="text-3xl font-bold text-gray-800 mb-8">Booking Summary</h1>
 
-                        {/* Room Details */}
                         <div className="space-y-6 mb-8">
                             {selectedRooms.map((room) => (
                                 <div key={room.id} className="bg-gray-50 rounded-xl p-6">
@@ -254,7 +243,6 @@ const SummaryPage = () => {
                                         </div>
                                     </div>
 
-                                    {/* Selected Dates */}
                                     <div>
                                         <span className="text-gray-600 text-sm">Selected Dates:</span>
                                         <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -281,7 +269,6 @@ const SummaryPage = () => {
                             ))}
                         </div>
 
-                        {/* Price Breakdown */}
                         <div className="border-t border-gray-200 pt-6 mb-8">
                             <h2 className="text-xl font-semibold mb-4">Price Breakdown</h2>
                             <div className="space-y-3">
@@ -309,7 +296,6 @@ const SummaryPage = () => {
                             </div>
                         </div>
 
-                        {/* Proceed to Payment Button */}
                         <div className="mt-8">
                             <button
                                 onClick={handleProceedToPayment}

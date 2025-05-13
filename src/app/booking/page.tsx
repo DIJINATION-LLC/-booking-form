@@ -194,7 +194,7 @@ const BookingOptions = () => {
                                     <p className="text-gray-600 text-center mb-4">Full month access</p>
                                     <div className="text-blue-600 font-bold">
                                         Full Day: $2000/room/month<br />
-                                        Half Day: $1000/room/month
+                                        Half Day: $1200/room/month
                                     </div>
                                 </div>
                             </button>

@@ -9,15 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@auth/mongodb-adapter": "^3.9.0",
+    "@auth/mongodb-adapter": "^3.9.1",
     "@stripe/react-stripe-js": "^3.7.0",
     "@stripe/stripe-js": "^7.3.0",
     "bcryptjs": "^2.4.3",
     "jspdf": "^3.0.1",
     "mongodb": "^6.3.0",
     "mongoose": "^8.0.3",
-    "next": "14.1.0",
-    "next-auth": "^4.24.11",
+    "next": "14.2.28",
+    "next-auth": "^4.24.7",
     "react": "^18",
     "react-dom": "^18",
     "react-hot-toast": "^2.4.1",
@@ -30,7 +30,7 @@
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",
     "eslint": "^8.56.0",
-    "eslint-config-next": "14.1.0",
+    "eslint-config-next": "14.2.28",
     "postcss": "^8",
     "tailwindcss": "^3.3.0",
     "typescript": "^5"

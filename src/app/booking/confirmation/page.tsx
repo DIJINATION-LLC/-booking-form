@@ -23,6 +23,17 @@ interface BookingDetails {
     };
 }
 
+const PRICING = {
+    daily: {
+        full: 300,
+        half: 160
+    },
+    monthly: {
+        full: 2000,
+        half: 1000
+    }
+}
+
 const ConfirmationPage = () => {
     const router = useRouter();
     const [bookingDetails, setBookingDetails] = useState<BookingDetails | null>(null);

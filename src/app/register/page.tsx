@@ -8,46 +8,63 @@ import Header from '@/components/Header';
 
 export default function Register() {
     const router = useRouter();
-    const [isLoading, setIsLoading] = useState(false);
     const [formData, setFormData] = useState({
-        email: '',
-        password: '',
         firstName: '',
         lastName: '',
+        email: '',
+        phoneNumber: '',
+        password: '',
+        confirmPassword: ''
     });
+    const [loading, setLoading] = useState(false);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsLoading(true);
+        setLoading(true);
 
-        // Password validation
-        if (formData.password.length < 8) {
-            toast.error('Password must be at least 8 characters long');
-            setIsLoading(false);
+        // Validate passwords match
+        if (formData.password !== formData.confirmPassword) {
+            toast.error('Passwords do not match');
+            setLoading(false);
             return;
         }
 
         try {
-            const res = await fetch('/api/register', {
+            const response = await fetch('/api/auth/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(formData),
+                body: JSON.stringify({
+                    firstName: formData.firstName,
+                    lastName: formData.lastName,
+                    email: formData.email,
+                    phoneNumber: formData.phoneNumber,
+                    password: formData.password
+                }),
             });
 
-            const data = await res.json();
+            const data = await response.json();
 
-            if (!res.ok) {
-                throw new Error(data.message || 'Something went wrong');
+            if (!response.ok) {
+                throw new Error(data.error || 'Registration failed');
             }
 
-            toast.success('Registration successful!');
+            // Registration successful
+            toast.success('Registration successful! Please log in.');
             router.push('/login');
-        } catch (error) {
-            toast.error(error instanceof Error ? error.message : 'Registration failed');
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Registration failed');
         } finally {
-            setIsLoading(false);
+            setLoading(false);
         }
     };
 
@@ -67,7 +84,7 @@ export default function Register() {
                                     className="mt-1 block w-full px-3 py-2 rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                     placeholder="First name"
                                     value={formData.firstName}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
+                                    onChange={handleChange}
                                     required
                                 />
                             </div>
@@ -79,7 +96,7 @@ export default function Register() {
                                     className="mt-1 block w-full px-3 py-2 rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                     placeholder="Last name"
                                     value={formData.lastName}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                                    onChange={handleChange}
                                     required
                                 />
                             </div>
@@ -92,7 +109,19 @@ export default function Register() {
                                 className="mt-1 block w-full px-3 py-2 rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 placeholder="Enter your email"
                                 value={formData.email}
-                                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                            <input
+                                type="tel"
+                                name="phoneNumber"
+                                className="mt-1 block w-full px-3 py-2 rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                placeholder="Enter your phone number"
+                                value={formData.phoneNumber}
+                                onChange={handleChange}
                                 required
                             />
                         </div>
@@ -104,26 +133,40 @@ export default function Register() {
                                 className="mt-1 block w-full px-3 py-2 rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 placeholder="Create a password"
                                 value={formData.password}
-                                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                                onChange={handleChange}
                                 required
+                                minLength={8}
                             />
                             <p className="mt-1 text-sm text-gray-500">
                                 Password must be at least 8 characters long
                             </p>
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                            <input
+                                type="password"
+                                name="confirmPassword"
+                                className="mt-1 block w-full px-3 py-2 rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                placeholder="Confirm your password"
+                                value={formData.confirmPassword}
+                                onChange={handleChange}
+                                required
+                                minLength={8}
+                            />
+                        </div>
                         <button
                             type="submit"
-                            disabled={isLoading}
-                            className={`w-full py-3 px-4 rounded-lg text-white text-lg font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 ${isLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                            disabled={loading}
+                            className={`w-full py-3 px-4 rounded-lg text-white text-lg font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
                                 }`}
                         >
-                            {isLoading ? (
+                            {loading ? (
                                 <div className="flex items-center justify-center">
                                     <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
-                                    Creating account...
+                                    Registering...
                                 </div>
                             ) : (
-                                'Create account'
+                                'Register'
                             )}
                         </button>
                     </form>

@@ -30,6 +30,10 @@ const userSchema = new mongoose.Schema({
         required: [true, 'Last name is required'],
         trim: true
     },
+    phoneNumber: {
+        type: String,
+        trim: true
+    },
     hasBookings: {
         type: Boolean,
         default: false

@@ -31,6 +31,12 @@ export async function POST(req: Request) {
 
         // Check authentication
         const session = await getServerSession(authOptions);
+        console.log('Authentication check:', {
+            hasSession: !!session,
+            hasUser: !!session?.user,
+            userId: session?.user?.id
+        });
+
         if (!session?.user?.id) {
             console.error('Payment intent creation failed: No authenticated user');
             return NextResponse.json(
@@ -44,7 +50,13 @@ export async function POST(req: Request) {
             const rawData = await req.text();
             console.log('Raw request data:', rawData);
             requestData = JSON.parse(rawData);
-            console.log('Parsed request data:', requestData);
+            console.log('Payment request details:', {
+                amount: requestData.amount,
+                hasBookingData: !!requestData.bookingData,
+                roomCount: requestData.bookingData?.rooms?.length,
+                totalAmount: requestData.bookingData?.totalAmount,
+                bookingType: requestData.bookingData?.bookingType
+            });
         } catch (e) {
             console.error('Payment intent creation failed: Invalid JSON data', e);
             return NextResponse.json(
@@ -174,7 +186,18 @@ export async function POST(req: Request) {
             });
 
             // Create Stripe payment intent
-            console.log('Creating Stripe payment intent...', { amount });
+            console.log('Creating Stripe payment intent...', {
+                amount,
+                currency: 'usd',
+                userId: session.user.id,
+                bookingIds: bookingIds.join(','),
+                metadata: {
+                    userId: session.user.id,
+                    bookingIds: bookingIds.join(','),
+                    bookingType: bookingData.bookingType
+                }
+            });
+
             const paymentIntent = await stripe.paymentIntents.create({
                 amount,
                 currency: 'usd',
@@ -188,10 +211,13 @@ export async function POST(req: Request) {
                 }
             });
 
-            console.log('Payment intent created:', {
-                id: paymentIntent.id,
+            console.log('Payment intent created successfully:', {
+                paymentIntentId: paymentIntent.id,
+                clientSecret: paymentIntent.client_secret ? 'present' : 'missing',
                 amount: paymentIntent.amount,
-                status: paymentIntent.status
+                currency: paymentIntent.currency,
+                status: paymentIntent.status,
+                metadata: paymentIntent.metadata
             });
 
             // Update bookings with payment intent ID

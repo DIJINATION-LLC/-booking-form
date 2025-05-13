@@ -24,24 +24,24 @@ const BookingOptions = () => {
     const [rooms, setRooms] = useState<Room[]>([
         {
             id: 1,
-            name: 'Consultation Room 1',
-            image: '/images/room1.jpg',
+            name: 'Room 1',
+            image: '/images/room1.png',
             description: 'Spacious consultation room with modern medical equipment',
             selected: false,
             timeSlot: 'full'
         },
         {
             id: 2,
-            name: 'Consultation Room 2',
-            image: '/images/room2.jpg',
+            name: 'Room 2',
+            image: '/images/room2.png',
             description: 'Well-lit examination room with patient comfort in mind',
             selected: false,
             timeSlot: 'full'
         },
         {
             id: 3,
-            name: 'Consultation Room 3',
-            image: '/images/room3.jpg',
+            name: 'Room 3',
+            image: '/images/room3.png',
             description: 'Private consultation space with state-of-the-art facilities',
             selected: false,
             timeSlot: 'full'

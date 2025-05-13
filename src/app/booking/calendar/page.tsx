@@ -182,68 +182,32 @@ const CalendarPage: React.FC = () => {
             return;
         }
 
-        if (bookingType === 'monthly') {
-            const startDate = new Date(normalizedDate);
-            const endDate = new Date(normalizedDate);
-            endDate.setMonth(endDate.getMonth() + 1);
-
-            const dates: string[] = [];
-            let currentDate = new Date(startDate);
-
-            while (currentDate < endDate) {
-                const day = currentDate.getDay();
-                const currentYear = currentDate.getFullYear();
-                const currentMonth = String(currentDate.getMonth() + 1).padStart(2, '0');
-                const currentDay = String(currentDate.getDate()).padStart(2, '0');
-                const currentDateStr = `${currentYear}-${currentMonth}-${currentDay}`;
-
-                // Only add if it's Monday–Friday and the slot is available
-                if (day >= 1 && day <= 5 && isTimeSlotAvailable(currentDate, roomId, room.timeSlot)) {
-                    dates.push(currentDateStr);
-                }
-
-                currentDate.setDate(currentDate.getDate() + 1);
-            }
-
-            if (dates.length > 0) {
-                setSelectedRooms(prev =>
-                    prev.map(r =>
-                        r.id === roomId ? { ...r, dates } : r
-                    )
-                );
-                toast.success(`Selected ${dates.length} available weekdays`);
-            } else {
-                toast.error('No available weekdays found within one month range');
-                return;
-            }
-        } else {
-            // Daily booking
+        // Check if the date is already selected
+        const dateIndex = room.dates?.indexOf(dateStr) ?? -1;
+        if (dateIndex === -1) {
+            // Adding new date
             setSelectedRooms(prev =>
                 prev.map(r => {
                     if (r.id === roomId) {
-                        const dateIndex = r.dates?.indexOf(dateStr) ?? -1;
-                        let newDates = r.dates || [];
-
-                        if (dateIndex === -1) {
-                            // Adding new date
-                            if (isTimeSlotAvailable(normalizedDate, roomId, r.timeSlot)) {
-                                newDates = [...newDates, dateStr];
-                                toast.success(`Selected ${r.timeSlot} slot for ${formatDisplayDate(dateStr)}`);
-                            } else {
-                                toast.error(`${r.timeSlot} slot is not available for this date`);
-                                return r;
-                            }
-                        } else {
-                            // Removing date
-                            newDates = newDates.filter(d => d !== dateStr);
-                            toast.success(`Removed ${r.timeSlot} slot for ${formatDisplayDate(dateStr)}`);
-                        }
-
+                        const newDates = [...(r.dates || []), dateStr];
                         return { ...r, dates: newDates };
                     }
                     return r;
                 })
             );
+            toast.success(`Selected ${room.timeSlot} slot for ${formatDisplayDate(dateStr)}`);
+        } else {
+            // Removing date
+            setSelectedRooms(prev =>
+                prev.map(r => {
+                    if (r.id === roomId) {
+                        const newDates = r.dates?.filter(d => d !== dateStr) || [];
+                        return { ...r, dates: newDates };
+                    }
+                    return r;
+                })
+            );
+            toast.success(`Removed ${room.timeSlot} slot for ${formatDisplayDate(dateStr)}`);
         }
 
         // Save to sessionStorage
@@ -500,14 +464,14 @@ const CalendarPage: React.FC = () => {
     };
 
     const getDateClassName = (date: Date | null, room: RoomBooking) => {
-        if (!date) return 'bg-gray-100 text-gray-400 cursor-not-allowed';
+        if (!date) return 'bg-gray-100 text-gray-400 pointer-events-none';
 
         const dateStr = date.toISOString().split('T')[0];
         const isSelected = room.dates?.includes(dateStr);
 
         // Check weekend first
         if (isWeekend(date)) {
-            return 'bg-gray-100 text-gray-400 cursor-not-allowed';
+            return 'bg-gray-100 text-gray-400 pointer-events-none';
         }
 
         // Get booking status
@@ -524,62 +488,56 @@ const CalendarPage: React.FC = () => {
 
             // If full day is booked
             if (hasFull) {
-                return 'bg-red-100 text-red-600 cursor-not-allowed';
+                return 'bg-red-100 text-red-600 pointer-events-none';
             }
 
             // For morning slot booking
             if (room.timeSlot === 'morning') {
                 if (hasMorning) {
-                    return 'bg-gradient-to-b from-red-100 to-transparent cursor-not-allowed';
+                    return 'bg-gradient-to-b from-red-100 to-transparent pointer-events-none';
                 }
                 if (isSelected) {
-                    return 'bg-gradient-to-b from-blue-500 to-transparent cursor-pointer';
+                    return 'bg-gradient-to-b from-blue-500 to-transparent';
                 }
-                return 'bg-white hover:bg-gradient-to-b hover:from-blue-100 hover:to-transparent cursor-pointer';
+                return 'bg-white hover:bg-gradient-to-b hover:from-blue-100 hover:to-transparent';
             }
 
             // For evening slot booking
             if (room.timeSlot === 'evening') {
                 if (hasEvening) {
-                    return 'bg-gradient-to-t from-red-100 to-transparent cursor-not-allowed';
+                    return 'bg-gradient-to-t from-red-100 to-transparent pointer-events-none';
                 }
                 if (isSelected) {
-                    return 'bg-gradient-to-t from-blue-500 to-transparent cursor-pointer';
+                    return 'bg-gradient-to-t from-blue-500 to-transparent';
                 }
-                return 'bg-white hover:bg-gradient-to-t hover:from-blue-100 hover:to-transparent cursor-pointer';
+                return 'bg-white hover:bg-gradient-to-t hover:from-blue-100 hover:to-transparent';
             }
 
             // For full day booking
             if (room.timeSlot === 'full') {
-                if (hasMorning && hasEvening) {
-                    return 'bg-red-100 text-red-600 cursor-not-allowed';
-                }
-                if (hasMorning) {
-                    return 'bg-gradient-to-b from-red-100 to-transparent cursor-not-allowed';
-                }
-                if (hasEvening) {
-                    return 'bg-gradient-to-t from-red-100 to-transparent cursor-not-allowed';
+                if (hasMorning || hasEvening) {
+                    return 'bg-red-100 text-red-600 pointer-events-none';
                 }
                 if (isSelected) {
-                    return 'bg-blue-500 text-white cursor-pointer';
+                    return 'bg-blue-500 text-white';
                 }
-                return 'bg-white hover:bg-blue-50 cursor-pointer';
+                return 'bg-white hover:bg-blue-50';
             }
         }
 
         // Handle selected states
         if (isSelected) {
             if (room.timeSlot === 'morning') {
-                return 'bg-gradient-to-b from-blue-500 to-transparent cursor-pointer';
+                return 'bg-gradient-to-b from-blue-500 to-transparent';
             } else if (room.timeSlot === 'evening') {
-                return 'bg-gradient-to-t from-blue-500 to-transparent cursor-pointer';
+                return 'bg-gradient-to-t from-blue-500 to-transparent';
             } else {
-                return 'bg-blue-500 text-white cursor-pointer';
+                return 'bg-blue-500 text-white';
             }
         }
 
         // Default available state
-        return 'bg-white hover:bg-blue-50 cursor-pointer';
+        return 'bg-white hover:bg-blue-50';
     };
 
     const handleProceed = async () => {

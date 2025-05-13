@@ -156,44 +156,107 @@ const SummaryPage = () => {
     const handleProceedToPayment = async () => {
         try {
             setIsProcessing(true);
+            console.log('Starting payment process...');
+
+            // Validate the data before proceeding
+            if (!selectedRooms || selectedRooms.length === 0) {
+                throw new Error('No rooms selected');
+            }
+
+            // Log the current state
+            console.log('Current state:', {
+                selectedRooms,
+                bookingType,
+                priceBreakdown
+            });
+
+            // Ensure all rooms have dates
+            const invalidRooms = selectedRooms.filter(room => !room.dates || room.dates.length === 0);
+            if (invalidRooms.length > 0) {
+                throw new Error('Some rooms have no dates selected');
+            }
+
+            if (priceBreakdown.total <= 0) {
+                throw new Error('Invalid total amount');
+            }
+
+            const paymentData = {
+                amount: Math.round(priceBreakdown.total * 100), // Convert to cents for Stripe
+                bookingData: {
+                    rooms: selectedRooms.map(room => ({
+                        id: room.id,
+                        timeSlot: room.timeSlot,
+                        dates: [...room.dates] // Ensure dates are properly copied
+                    })),
+                    bookingType,
+                    totalAmount: priceBreakdown.total
+                }
+            };
+
+            console.log('Sending payment request:', JSON.stringify(paymentData, null, 2));
 
             const response = await fetch('/api/create-payment-intent', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    amount: Math.round(priceBreakdown.total * 100),
-                    bookingData: {
-                        rooms: selectedRooms,
-                        bookingType,
-                        totalAmount: priceBreakdown.total
-                    }
-                }),
+                body: JSON.stringify(paymentData),
             });
 
+            console.log('Response status:', response.status);
+            const responseData = await response.json();
+            console.log('Response data:', responseData);
+
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to create payment intent');
+                throw new Error(responseData.error || 'Failed to create payment intent');
             }
 
-            const { clientSecret } = await response.json();
+            if (!responseData.clientSecret) {
+                throw new Error('No client secret received from payment intent creation');
+            }
 
-            sessionStorage.setItem('confirmationData', JSON.stringify({
-                rooms: selectedRooms,
+            // Store booking data with consistent structure
+            const bookingDataToStore = {
+                rooms: selectedRooms.map(room => ({
+                    id: room.id,
+                    name: `Room ${room.id}`,
+                    timeSlot: room.timeSlot,
+                    dates: [...room.dates] // Ensure dates are properly copied
+                })),
+                totalAmount: priceBreakdown.total,
                 bookingType,
-                priceBreakdown,
-                clientSecret
-            }));
+                bookingDate: new Date().toISOString(),
+                priceBreakdown: {
+                    subtotal: priceBreakdown.subtotal,
+                    tax: priceBreakdown.tax,
+                    securityDeposit: priceBreakdown.securityDeposit,
+                    total: priceBreakdown.total
+                }
+            };
 
+            console.log('Storing booking data:', JSON.stringify(bookingDataToStore, null, 2));
+
+            // Clear any existing data first
+            sessionStorage.removeItem('bookingData');
+            sessionStorage.removeItem('paymentIntent');
+
+            // Store new data
+            sessionStorage.setItem('bookingData', JSON.stringify(bookingDataToStore));
             sessionStorage.setItem('paymentIntent', JSON.stringify({
-                clientSecret
+                clientSecret: responseData.clientSecret
             }));
 
+            console.log('Data stored, redirecting to payment page...');
             router.push('/booking/payment');
         } catch (error) {
             console.error('Payment setup error:', error);
-            toast.error('Failed to setup payment. Please try again.');
+            toast.error(error instanceof Error ? error.message : 'Failed to setup payment. Please try again.');
+            // Log the full error details
+            console.error('Full error details:', {
+                error,
+                message: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
         } finally {
             setIsProcessing(false);
         }

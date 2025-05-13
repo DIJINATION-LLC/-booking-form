@@ -9,6 +9,7 @@ import jsPDF from 'jspdf';
 interface BookingDetails {
     rooms: Array<{
         id: number;
+        name: string;
         timeSlot: 'full' | 'morning' | 'evening';
         dates: string[];
     }>;
@@ -42,28 +43,77 @@ const ConfirmationPage = () => {
 
     useEffect(() => {
         try {
-            // Get confirmation details
-            const confirmationData = localStorage.getItem('confirmationData');
-            if (!confirmationData) {
-                console.error('No confirmation data found in localStorage');
+            // Check for Stripe payment status in URL
+            const params = new URLSearchParams(window.location.search);
+            const paymentIntentId = params.get('payment_intent');
+            const paymentIntentClientSecret = params.get('payment_intent_client_secret');
+
+            // First try to get confirmation data
+            const confirmationData = sessionStorage.getItem('confirmationData');
+
+            // If we have confirmation data, use it
+            if (confirmationData) {
+                try {
+                    const parsedData = JSON.parse(confirmationData);
+                    setBookingDetails(parsedData);
+                    setIsLoading(false);
+                    return;
+                } catch (error) {
+                    console.error('Error parsing confirmation data:', error);
+                }
+            }
+
+            // If we don't have confirmation data but have payment intent, try to get booking data
+            if (paymentIntentId && paymentIntentClientSecret) {
+                const bookingData = sessionStorage.getItem('bookingData');
+                console.log('Retrieved booking data:', bookingData);
+
+                if (!bookingData) {
+                    console.error('No booking data found in sessionStorage');
+                    toast.error('No booking confirmation found');
+                    router.push('/booking');
+                    return;
+                }
+
+                try {
+                    // Parse and validate the data
+                    const parsedData = JSON.parse(bookingData);
+
+                    // Validate required fields
+                    if (!parsedData.rooms || !Array.isArray(parsedData.rooms) || parsedData.rooms.length === 0) {
+                        throw new Error('Invalid booking data: No rooms found');
+                    }
+
+                    if (!parsedData.bookingType) {
+                        throw new Error('Invalid booking data: No booking type found');
+                    }
+
+                    // Store confirmation data
+                    sessionStorage.setItem('confirmationData', bookingData);
+                    console.log('Stored confirmation data successfully');
+
+                    // Set the booking details
+                    setBookingDetails(parsedData);
+                    setIsLoading(false);
+
+                    // Clean up booking data only after successful setup
+                    sessionStorage.removeItem('bookingData');
+                    sessionStorage.removeItem('paymentIntent');
+                } catch (error) {
+                    console.error('Error processing booking data:', error);
+                    toast.error('Error processing booking data');
+                    router.push('/booking');
+                }
+            } else {
+                // No payment intent and no confirmation data
+                console.error('No payment intent or confirmation data found');
                 toast.error('No booking confirmation found');
                 router.push('/booking');
-                return;
             }
-
-            const parsedData = JSON.parse(confirmationData);
-            // Ensure we have the total amount from priceBreakdown if not directly available
-            if (!parsedData.totalAmount && parsedData.priceBreakdown) {
-                parsedData.totalAmount = parsedData.priceBreakdown.total;
-            }
-
-            setBookingDetails(parsedData);
         } catch (error) {
-            console.error('Error parsing confirmation data:', error);
-            toast.error('Invalid confirmation data');
+            console.error('Error in confirmation page:', error);
+            toast.error('Failed to load booking confirmation');
             router.push('/booking');
-        } finally {
-            setIsLoading(false);
         }
     }, [router]);
 
@@ -128,7 +178,7 @@ const ConfirmationPage = () => {
         yPos += 8;
 
         const bookingNumber = Date.now().toString(36).toUpperCase();
-        const user = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')!) : null;
+        const user = sessionStorage.getItem('user') ? JSON.parse(sessionStorage.getItem('user')!) : null;
 
         pdf.text(`Booking Number: ${bookingNumber}`, margin, yPos);
         yPos += lineHeight;

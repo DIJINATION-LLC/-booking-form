@@ -9,14 +9,14 @@ export async function middleware(request: NextRequest) {
     });
 
     // Define public paths that don't require authentication
-    const publicPaths = ['/', '/login'];
+    const publicPaths = ['/', '/login', '/register', '/api/test-db', '/api/test-user'];
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname);
     const isApiAuthPath = request.nextUrl.pathname.startsWith('/api/auth/');
     const isApiPath = request.nextUrl.pathname.startsWith('/api/');
 
     // Allow public paths and auth API routes
     if (isPublicPath || isApiAuthPath) {
-        if (token && isPublicPath) {
+        if (token && isPublicPath && request.nextUrl.pathname !== '/') {
             // If user is already logged in and tries to access public pages,
             // redirect to booking page
             return NextResponse.redirect(new URL('/booking', request.url));

@@ -1,4 +1,5 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, MongoClientOptions } from 'mongodb';
+import { cache } from 'react';
 
 if (!process.env.MONGODB_URI) {
     throw new Error('Please define the MONGODB_URI environment variable inside .env.local');
@@ -15,26 +16,34 @@ if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
     }
 }
 
-const options = {
+const options: MongoClientOptions = {
     maxPoolSize: 10,
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-    connectTimeoutMS: 10000,
+    minPoolSize: 5,
+    maxIdleTimeMS: 30000,
+    connectTimeoutMS: 30000,
+    serverSelectionTimeoutMS: 30000,
+    socketTimeoutMS: 30000,
+    waitQueueTimeoutMS: 30000,
+    retryWrites: true,
+    retryReads: true
 };
-
-let client: MongoClient;
-let clientPromise: Promise<MongoClient>;
 
 declare global {
     var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
+let clientPromise: Promise<MongoClient>;
+
 if (process.env.NODE_ENV === 'development') {
     // In development mode, use a global variable so that the value
     // is preserved across module reloads caused by HMR (Hot Module Replacement).
     if (!global._mongoClientPromise) {
-        client = new MongoClient(uri, options);
+        const client = new MongoClient(uri, options);
         global._mongoClientPromise = client.connect()
+            .then(client => {
+                console.log('Successfully connected to MongoDB');
+                return client;
+            })
             .catch(error => {
                 console.error('Failed to connect to MongoDB:', error);
                 throw error;
@@ -43,8 +52,12 @@ if (process.env.NODE_ENV === 'development') {
     clientPromise = global._mongoClientPromise;
 } else {
     // In production mode, it's best to not use a global variable.
-    client = new MongoClient(uri, options);
+    const client = new MongoClient(uri, options);
     clientPromise = client.connect()
+        .then(client => {
+            console.log('Successfully connected to MongoDB');
+            return client;
+        })
         .catch(error => {
             console.error('Failed to connect to MongoDB:', error);
             throw error;
@@ -55,32 +68,34 @@ if (process.env.NODE_ENV === 'development') {
 // separate module, the client can be shared across functions.
 export default clientPromise;
 
-export async function connectToDatabase() {
-    try {
-        console.log('Attempting to connect to MongoDB...');
-        const client = await clientPromise;
-        const dbName = process.env.MONGODB_DB || 'hire-a-clinic';
-        const db = client.db(dbName);
+// Cached database connection with retry mechanism
+export const connectToDatabase = cache(async () => {
+    let retries = 3;
+    let lastError;
 
-        // Test the connection
-        await db.command({ ping: 1 });
-        console.log('Successfully connected to MongoDB database:', dbName);
+    while (retries > 0) {
+        try {
+            const client = await clientPromise;
+            const dbName = process.env.MONGODB_DB || 'hire-a-clinic';
+            const db = client.db(dbName);
 
-        return { client, db };
-    } catch (error) {
-        console.error('Database connection error:', error);
-        // Check if it's a connection error
-        if (error instanceof Error) {
-            if (error.message.includes('ECONNREFUSED')) {
-                throw new Error('Could not connect to MongoDB. Please check if MongoDB is running.');
-            }
-            if (error.message.includes('Authentication failed')) {
-                throw new Error('MongoDB authentication failed. Please check your credentials.');
-            }
-            if (error.message.includes('Invalid connection string')) {
-                throw new Error('Invalid MongoDB connection string. Please check your MONGODB_URI.');
+            // Test the connection
+            await db.command({ ping: 1 });
+            console.log('Successfully connected to database:', dbName);
+
+            return { client, db };
+        } catch (error) {
+            lastError = error;
+            console.error(`Database connection attempt failed. Retries left: ${retries - 1}`, error);
+            retries--;
+
+            if (retries > 0) {
+                // Wait for 1 second before retrying
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
-        throw new Error('Failed to establish database connection. Please try again later.');
     }
-}
+
+    console.error('All database connection attempts failed');
+    throw lastError || new Error('Failed to establish database connection after multiple attempts');
+});

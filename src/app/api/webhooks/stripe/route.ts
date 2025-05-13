@@ -3,19 +3,27 @@ import Stripe from 'stripe';
 import { headers } from 'next/headers';
 import { connectToDatabase } from '@/lib/mongodb';
 
-if (!process.env.STRIPE_SECRET_KEY) {
-    throw new Error('STRIPE_SECRET_KEY is not set');
-}
+// Check for required environment variables
+const requiredEnvVars = {
+    STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET
+};
 
-if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    throw new Error('STRIPE_WEBHOOK_SECRET is not set');
-}
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+// Only initialize Stripe if configuration is available
+const stripe = requiredEnvVars.STRIPE_SECRET_KEY ? new Stripe(requiredEnvVars.STRIPE_SECRET_KEY, {
     typescript: true,
-});
+}) : null;
 
 export async function POST(req: Request) {
+    // Check if Stripe is properly configured
+    if (!stripe || !requiredEnvVars.STRIPE_WEBHOOK_SECRET) {
+        console.error('Stripe configuration is incomplete. Required environment variables are missing.');
+        return NextResponse.json(
+            { error: 'Stripe is not properly configured' },
+            { status: 503 }
+        );
+    }
+
     const body = await req.text();
     const signature = headers().get('stripe-signature');
 
@@ -30,59 +38,50 @@ export async function POST(req: Request) {
         const event = stripe.webhooks.constructEvent(
             body,
             signature,
-            process.env.STRIPE_WEBHOOK_SECRET
+            requiredEnvVars.STRIPE_WEBHOOK_SECRET
         );
 
         const { db } = await connectToDatabase();
 
+        // Handle the event
         switch (event.type) {
-            case 'payment_intent.succeeded': {
-                const paymentIntent = event.data.object as Stripe.PaymentIntent;
-                const userId = paymentIntent.metadata.userId;
-
+            case 'payment_intent.succeeded':
+                const paymentIntent = event.data.object;
                 // Update booking status
-                await db.collection('bookings').updateMany(
-                    {
-                        userId,
-                        'paymentDetails.paymentIntentId': paymentIntent.id,
-                        status: 'pending'
-                    },
-                    {
-                        $set: {
-                            status: 'confirmed',
-                            'paymentDetails.status': 'paid',
-                            'paymentDetails.paidAt': new Date(),
-                            updatedAt: new Date()
+                if (paymentIntent.metadata?.bookingIds) {
+                    const bookingIds = paymentIntent.metadata.bookingIds.split(',');
+                    await db.collection('bookings').updateMany(
+                        { _id: { $in: bookingIds } },
+                        {
+                            $set: {
+                                status: 'confirmed',
+                                'paymentDetails.status': 'paid',
+                                'paymentDetails.paidAt': new Date(),
+                                updatedAt: new Date()
+                            }
                         }
-                    }
-                );
-
+                    );
+                }
                 break;
-            }
-
-            case 'payment_intent.payment_failed': {
-                const paymentIntent = event.data.object as Stripe.PaymentIntent;
-                const userId = paymentIntent.metadata.userId;
-
-                // Update booking status
-                await db.collection('bookings').updateMany(
-                    {
-                        userId,
-                        'paymentDetails.paymentIntentId': paymentIntent.id,
-                        status: 'pending'
-                    },
-                    {
-                        $set: {
-                            status: 'failed',
-                            'paymentDetails.status': 'failed',
-                            'paymentDetails.failedAt': new Date(),
-                            updatedAt: new Date()
+            case 'payment_intent.payment_failed':
+                const failedPayment = event.data.object;
+                if (failedPayment.metadata?.bookingIds) {
+                    const bookingIds = failedPayment.metadata.bookingIds.split(',');
+                    await db.collection('bookings').updateMany(
+                        { _id: { $in: bookingIds } },
+                        {
+                            $set: {
+                                status: 'failed',
+                                'paymentDetails.status': 'failed',
+                                'paymentDetails.failedAt': new Date(),
+                                updatedAt: new Date()
+                            }
                         }
-                    }
-                );
-
+                    );
+                }
                 break;
-            }
+            default:
+                console.log(`Unhandled event type ${event.type}`);
         }
 
         return NextResponse.json({ received: true });

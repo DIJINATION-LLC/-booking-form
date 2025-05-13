@@ -5,6 +5,7 @@ import clientPromise from "./mongodb";
 import { compare } from "bcryptjs";
 import { connectToDatabase } from "./mongodb";
 import { Adapter } from "next-auth/adapters";
+import { cache } from 'react';
 
 // Extend the default session type
 declare module "next-auth" {
@@ -34,6 +35,20 @@ if (!process.env.NEXTAUTH_SECRET) {
     throw new Error('Please define NEXTAUTH_SECRET environment variable');
 }
 
+// Cache user lookup
+const findUserByEmail = cache(async (email: string) => {
+    try {
+        console.log('Looking up user by email:', email);
+        const { db } = await connectToDatabase();
+        const user = await db.collection("users").findOne({ email: email.toLowerCase() });
+        console.log('User lookup result:', user ? 'User found' : 'User not found');
+        return user;
+    } catch (error) {
+        console.error('Error finding user:', error);
+        throw error;
+    }
+});
+
 export const authOptions: NextAuthOptions = {
     adapter: MongoDBAdapter(clientPromise) as Adapter,
     secret: process.env.NEXTAUTH_SECRET,
@@ -54,60 +69,81 @@ export const authOptions: NextAuthOptions = {
                 password: { label: "Password", type: "password" }
             },
             async authorize(credentials) {
-                if (!credentials?.email || !credentials?.password) {
-                    throw new Error("Please enter both email and password");
+                try {
+                    console.log('Starting authorization for email:', credentials?.email);
+
+                    if (!credentials?.email || !credentials?.password) {
+                        console.error('Missing credentials');
+                        throw new Error("Please enter both email and password");
+                    }
+
+                    const user = await findUserByEmail(credentials.email);
+
+                    if (!user) {
+                        console.error('User not found');
+                        throw new Error("Invalid email or password");
+                    }
+
+                    console.log('Comparing passwords...');
+                    const isPasswordValid = await compare(credentials.password, user.password);
+
+                    if (!isPasswordValid) {
+                        console.error('Invalid password');
+                        throw new Error("Invalid email or password");
+                    }
+
+                    console.log('Authorization successful');
+                    return {
+                        id: user._id.toString(),
+                        email: user.email,
+                        name: user.name || `${user.firstName} ${user.lastName}`,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                    };
+                } catch (error) {
+                    console.error('Authorization error:', error);
+                    throw error;
                 }
-
-                const { db } = await connectToDatabase();
-
-                const user = await db.collection("users").findOne({
-                    email: credentials.email.toLowerCase()
-                });
-
-                if (!user) {
-                    throw new Error("Invalid email or password");
-                }
-
-                const isPasswordValid = await compare(credentials.password, user.password);
-
-                if (!isPasswordValid) {
-                    throw new Error("Invalid email or password");
-                }
-
-                return {
-                    id: user._id.toString(),
-                    email: user.email,
-                    name: user.name || `${user.firstName} ${user.lastName}`,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                };
             }
         })
     ],
     callbacks: {
         async jwt({ token, user, trigger, session }) {
-            if (user) {
-                token.id = user.id;
-                token.email = user.email;
-                token.name = user.name;
-                token.firstName = user.firstName;
-                token.lastName = user.lastName;
+            try {
+                if (user) {
+                    console.log('Setting JWT token data from user');
+                    token.id = user.id;
+                    token.email = user.email;
+                    token.name = user.name;
+                    token.firstName = user.firstName;
+                    token.lastName = user.lastName;
+                }
+                // Handle user updates
+                if (trigger === "update" && session) {
+                    console.log('Updating JWT token with session data');
+                    token = { ...token, ...session };
+                }
+                return token;
+            } catch (error) {
+                console.error('JWT callback error:', error);
+                throw error;
             }
-            // Handle user updates
-            if (trigger === "update" && session) {
-                token = { ...token, ...session };
-            }
-            return token;
         },
         async session({ session, token }) {
-            if (session.user) {
-                session.user.id = token.id;
-                session.user.email = token.email || '';
-                session.user.name = token.name || '';
-                session.user.firstName = token.firstName;
-                session.user.lastName = token.lastName;
+            try {
+                console.log('Setting session data from token');
+                if (session.user) {
+                    session.user.id = token.id;
+                    session.user.email = token.email || '';
+                    session.user.name = token.name || '';
+                    session.user.firstName = token.firstName;
+                    session.user.lastName = token.lastName;
+                }
+                return session;
+            } catch (error) {
+                console.error('Session callback error:', error);
+                throw error;
             }
-            return session;
         }
     },
     // Only enable debug in development and when explicitly enabled

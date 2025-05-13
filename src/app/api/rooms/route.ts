@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
+import { cache } from 'react';
+
+// Cache room data for 5 minutes
+const getRooms = cache(async () => {
+    const { db } = await connectToDatabase();
+    return db.collection('rooms')
+        .find({ isAvailable: true })
+        .toArray();
+});
 
 export async function GET() {
     try {
-        const { db } = await connectToDatabase();
-        const rooms = await db.collection('rooms')
-            .find({ isAvailable: true })
-            .toArray();
+        const rooms = await getRooms();
         return NextResponse.json(rooms);
     } catch (error) {
         console.error('Error fetching rooms:', error);
@@ -24,6 +30,9 @@ export async function POST(req: Request) {
 
         // Create new room
         const result = await db.collection('rooms').insertOne(body);
+
+        // Invalidate the getRooms cache by calling it again
+        await getRooms();
 
         return NextResponse.json(
             { message: 'Room created successfully', roomId: result.insertedId },

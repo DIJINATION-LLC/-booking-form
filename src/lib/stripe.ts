@@ -4,7 +4,7 @@ export const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHAB
 
 export const createPaymentIntent = async (amount: number) => {
     try {
-        const response = await fetch('/api/create-payment-intent', {
+        const response = await fetch('/api/payment/intent', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

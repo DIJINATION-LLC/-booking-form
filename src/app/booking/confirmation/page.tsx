@@ -9,13 +9,18 @@ import jsPDF from 'jspdf';
 interface BookingDetails {
     rooms: Array<{
         id: number;
-        name: string;
         timeSlot: 'full' | 'morning' | 'evening';
         dates: string[];
     }>;
-    totalAmount: number;
+    totalAmount?: number;
     bookingType: 'daily' | 'monthly';
-    bookingDate: string;
+    bookingDate?: string;
+    priceBreakdown: {
+        subtotal: number;
+        tax: number;
+        securityDeposit: number;
+        total: number;
+    };
 }
 
 const ConfirmationPage = () => {
@@ -35,7 +40,13 @@ const ConfirmationPage = () => {
                 return;
             }
 
-            setBookingDetails(JSON.parse(confirmationData));
+            const parsedData = JSON.parse(confirmationData);
+            // Ensure we have the total amount from priceBreakdown if not directly available
+            if (!parsedData.totalAmount && parsedData.priceBreakdown) {
+                parsedData.totalAmount = parsedData.priceBreakdown.total;
+            }
+
+            setBookingDetails(parsedData);
         } catch (error) {
             console.error('Error parsing confirmation data:', error);
             toast.error('Invalid confirmation data');
@@ -165,7 +176,7 @@ const ConfirmationPage = () => {
         pdf.text('PAYMENT DETAILS', margin, yPos);
         yPos += 8;
         pdf.setFont("helvetica", "normal");
-        pdf.text(`Total Amount: $${booking.totalAmount.toFixed(2)}`, margin, yPos);
+        pdf.text(`Total Amount: $${booking.totalAmount?.toFixed(2) || booking.priceBreakdown.total.toFixed(2)}`, margin, yPos);
         yPos += lineHeight;
         pdf.text('Security Deposit: $250.00 (Refundable)', margin, yPos);
 
@@ -250,7 +261,7 @@ const ConfirmationPage = () => {
                             </div>
                             <h1 className="text-4xl font-bold text-gray-800 mb-3">Booking Confirmed!</h1>
                             <p className="text-lg text-gray-600 mb-1">Your booking has been successfully completed</p>
-                            <p className="text-sm text-gray-500 mt-2">Booking Date: {formatDate(bookingDetails.bookingDate)}</p>
+                            <p className="text-sm text-gray-500 mt-2">Booking Date: {formatDate(bookingDetails.bookingDate || new Date().toISOString())}</p>
                         </div>
 
                         <div className="mb-10">
@@ -287,7 +298,7 @@ const ConfirmationPage = () => {
                             <div className="bg-blue-50 p-6 rounded-xl shadow-inner">
                                 <div className="flex justify-between items-center">
                                     <span className="text-lg font-medium text-gray-700">Total Amount Paid:</span>
-                                    <span className="text-2xl font-bold text-blue-600">${bookingDetails.totalAmount.toFixed(2)}</span>
+                                    <span className="text-2xl font-bold text-blue-600">${bookingDetails.totalAmount?.toFixed(2) || bookingDetails.priceBreakdown.total.toFixed(2)}</span>
                                 </div>
                             </div>
                         </div>

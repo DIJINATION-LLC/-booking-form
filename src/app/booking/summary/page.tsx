@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { PRICING, TimeSlot, BookingType } from '@/constants/pricing';
 import Header from '@/components/Header';
+import { useSession } from 'next-auth/react';
+import { loadStripe } from '@stripe/stripe-js';
 
 interface Room {
     id: number;
@@ -19,15 +21,50 @@ interface PriceBreakdown {
     total: number;
 }
 
-interface CardDetails {
-    cardNumber: string;
-    expiryDate: string;
-    cvv: string;
-    name: string;
+interface BookingData {
+    rooms: Room[];
+    bookingType: BookingType;
+    totalAmount: number;
 }
+
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+
+const calculatePriceBreakdown = (rooms: Room[], type: BookingType): PriceBreakdown => {
+    let subtotal = 0;
+    let securityDeposit = 0;
+
+    rooms.forEach(room => {
+        const numberOfDays = room.dates.length;
+        if (numberOfDays === 0) return;
+
+        const basePrice = PRICING[type][room.timeSlot];
+
+        if (type === 'daily') {
+            subtotal += basePrice * numberOfDays;
+        } else {
+            subtotal += basePrice;
+        }
+    });
+
+    // Add security deposit only once if there are any rooms with dates
+    if (rooms.some(room => room.dates.length > 0)) {
+        securityDeposit = PRICING.securityDeposit;
+    }
+
+    const tax = subtotal * PRICING.taxRate;
+    const total = subtotal + tax + securityDeposit;
+
+    return {
+        subtotal,
+        tax,
+        securityDeposit,
+        total
+    };
+};
 
 const SummaryPage = () => {
     const router = useRouter();
+    const { data: session, status } = useSession();
     const [selectedRooms, setSelectedRooms] = useState<Room[]>([]);
     const [bookingType, setBookingType] = useState<BookingType>('daily');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -37,19 +74,12 @@ const SummaryPage = () => {
         securityDeposit: 0,
         total: 0
     });
-    const [cardDetails, setCardDetails] = useState<CardDetails>({
-        cardNumber: '',
-        expiryDate: '',
-        cvv: '',
-        name: ''
-    });
 
     useEffect(() => {
         // Check authentication
-        const user = localStorage.getItem('user');
-        if (!user) {
+        if (status === 'unauthenticated') {
             toast.error('Please login to continue');
-            router.push('/');
+            router.push('/login?callbackUrl=/booking/summary');
             return;
         }
 
@@ -62,49 +92,25 @@ const SummaryPage = () => {
         }
 
         try {
-            const bookingData = JSON.parse(bookingDataStr);
+            const bookingData = JSON.parse(bookingDataStr) as BookingData;
             setSelectedRooms(bookingData.rooms);
             setBookingType(bookingData.bookingType);
-            calculatePriceBreakdown(bookingData.rooms, bookingData.bookingType);
+
+            const priceBreakdownData = calculatePriceBreakdown(bookingData.rooms, bookingData.bookingType);
+            setPriceBreakdown(priceBreakdownData);
+
+            // Update localStorage with total amount
+            const updatedBookingData = {
+                ...bookingData,
+                totalAmount: priceBreakdownData.total
+            };
+            localStorage.setItem('bookingData', JSON.stringify(updatedBookingData));
         } catch (error) {
             console.error('Error parsing booking data:', error);
             toast.error('Invalid booking data');
             router.push('/booking');
         }
-    }, [router]);
-
-    const calculatePriceBreakdown = (rooms: Room[], type: BookingType) => {
-        let subtotal = 0;
-        let securityDeposit = 0;
-
-        rooms.forEach(room => {
-            const numberOfDays = room.dates.length;
-            if (numberOfDays === 0) return;
-
-            const basePrice = PRICING[type][room.timeSlot];
-
-            if (type === 'daily') {
-                subtotal += basePrice * numberOfDays;
-            } else {
-                subtotal += basePrice;
-            }
-        });
-
-        // Add security deposit only once if there are any rooms with dates
-        if (rooms.some(room => room.dates.length > 0)) {
-            securityDeposit = PRICING.securityDeposit;
-        }
-
-        const tax = subtotal * PRICING.taxRate;
-        const total = subtotal + tax + securityDeposit;
-
-        setPriceBreakdown({
-            subtotal,
-            tax,
-            securityDeposit,
-            total
-        });
-    };
+    }, [router, status]);
 
     const handleRemoveDate = (roomId: number, dateToRemove: string) => {
         if (bookingType !== 'daily') {
@@ -121,7 +127,7 @@ const SummaryPage = () => {
                 };
             }
             return room;
-        }).filter(room => room.dates.length > 0); // Remove rooms with no dates
+        }).filter(room => room.dates.length > 0);
 
         if (updatedRooms.length === 0) {
             toast.error('Cannot remove all dates. Please keep at least one booking.');
@@ -129,22 +135,22 @@ const SummaryPage = () => {
         }
 
         setSelectedRooms(updatedRooms);
-        calculatePriceBreakdown(updatedRooms, bookingType);
+        const newPriceBreakdown = calculatePriceBreakdown(updatedRooms, bookingType);
+        setPriceBreakdown(newPriceBreakdown);
 
-        // Update localStorage
+        // Update localStorage with total amount
         const bookingData = {
             rooms: updatedRooms,
-            bookingType
+            bookingType,
+            totalAmount: newPriceBreakdown.total
         };
         localStorage.setItem('bookingData', JSON.stringify(bookingData));
         toast.success('Date removed successfully');
     };
 
     const formatDate = (dateStr: string) => {
-        // Parse the date in local timezone
         const [year, month, day] = dateStr.split('-').map(Number);
-        const date = new Date(year, month - 1, day); // month is 0-based in Date constructor
-
+        const date = new Date(year, month - 1, day);
         return date.toLocaleDateString('en-US', {
             weekday: 'long',
             month: 'long',
@@ -153,129 +159,66 @@ const SummaryPage = () => {
         });
     };
 
-    const handleCardDetailsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value } = e.target;
-        let formattedValue = value;
-
-        // Format card number with spaces
-        if (name === 'cardNumber') {
-            formattedValue = value.replace(/\s/g, '').replace(/(\d{4})/g, '$1 ').trim();
-            formattedValue = formattedValue.substring(0, 19); // Limit to 16 digits + 3 spaces
-        }
-
-        // Format expiry date
-        if (name === 'expiryDate') {
-            formattedValue = value.replace(/\D/g, '');
-            if (formattedValue.length >= 2) {
-                formattedValue = formattedValue.substring(0, 2) + '/' + formattedValue.substring(2, 4);
-            }
-            formattedValue = formattedValue.substring(0, 5);
-        }
-
-        // Format CVV
-        if (name === 'cvv') {
-            formattedValue = value.replace(/\D/g, '').substring(0, 3);
-        }
-
-        setCardDetails(prev => ({
-            ...prev,
-            [name]: formattedValue
-        }));
-    };
-
-    const handleCompleteBooking = async () => {
-        setIsProcessing(true);
+    const handleProceedToPayment = async () => {
         try {
-            // Basic validation
-            if (!cardDetails.cardNumber || !cardDetails.expiryDate || !cardDetails.cvv || !cardDetails.name) {
-                throw new Error('Please fill in all payment details');
-            }
+            setIsProcessing(true);
 
-            // Get user data
-            const userData = localStorage.getItem('user');
-            if (!userData) {
-                throw new Error('User not authenticated');
-            }
-            const user = JSON.parse(userData);
-
-            // Store confirmation data first
-            const confirmationData = {
-                rooms: selectedRooms.map(room => ({
-                    ...room,
-                    name: `Room ${room.id}`
-                })),
-                bookingType,
-                totalAmount: priceBreakdown.total,
-                bookingDate: new Date().toISOString(),
-                paymentDetails: {
-                    cardLast4: cardDetails.cardNumber.slice(-4),
-                    cardholderName: cardDetails.name
-                }
-            };
-            localStorage.setItem('confirmationData', JSON.stringify(confirmationData));
-
-            // Prepare booking data for API
-            const bookingData = {
-                userId: user._id,
-                rooms: selectedRooms.map(room => ({
-                    id: room.id,
-                    timeSlot: room.timeSlot,
-                    dates: room.dates
-                })),
-                bookingType,
-                totalAmount: priceBreakdown.total,
-                paymentDetails: {
-                    cardLast4: cardDetails.cardNumber.slice(-4),
-                    cardholderName: cardDetails.name
-                }
-            };
-
-            // Submit booking to API
-            const response = await fetch('/api/bookings/create', {
+            // Create payment intent with properly structured data
+            const response = await fetch('/api/create-payment-intent', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(bookingData)
+                body: JSON.stringify({
+                    amount: Math.round(priceBreakdown.total * 100), // Convert to cents for Stripe
+                    bookingData: {
+                        rooms: selectedRooms,
+                        bookingType,
+                        totalAmount: priceBreakdown.total
+                    }
+                }),
             });
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to create booking');
+                throw new Error(errorData.error || 'Failed to create payment intent');
             }
 
-            const responseData = await response.json();
+            const { clientSecret } = await response.json();
 
-            // Update user's booking status in localStorage
-            const updatedUser = {
-                ...user,
-                hasBookings: true
-            };
-            localStorage.setItem('user', JSON.stringify(updatedUser));
+            // Store booking data for confirmation
+            localStorage.setItem('confirmationData', JSON.stringify({
+                rooms: selectedRooms,
+                bookingType,
+                priceBreakdown,
+                clientSecret
+            }));
 
-            // Clear booking data from localStorage
-            localStorage.removeItem('bookingData');
-            localStorage.removeItem('selectedRooms');
-            localStorage.removeItem('bookingType');
+            // Store client secret for payment page
+            localStorage.setItem('paymentIntent', JSON.stringify({
+                clientSecret
+            }));
 
-            toast.success('Booking completed successfully!');
-            router.push('/booking/confirmation');
+            // Redirect to payment page
+            router.push('/booking/payment');
         } catch (error) {
-            console.error('Booking failed:', error);
-            toast.error(error instanceof Error ? error.message : 'Failed to complete booking');
+            console.error('Payment setup error:', error);
+            toast.error('Failed to setup payment. Please try again.');
         } finally {
             setIsProcessing(false);
         }
     };
 
+    if (status === 'loading') {
+        return <div className="min-h-screen flex items-center justify-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-blue-500"></div>
+        </div>;
+    }
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
-            {/* Header */}
-            <header className="sticky top-0 left-0 right-0 z-50 bg-white shadow-md">
-                <Header />
-            </header>
+            <Header />
 
-            {/* Main Content */}
             <main className="container mx-auto px-4 py-8">
                 <div className="max-w-4xl mx-auto">
                     <button
@@ -288,7 +231,7 @@ const SummaryPage = () => {
                         Back to Calendar
                     </button>
 
-                    <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
+                    <div className="bg-white rounded-2xl shadow-xl p-8">
                         <h1 className="text-3xl font-bold text-gray-800 mb-8">Booking Summary</h1>
 
                         {/* Room Details */}
@@ -299,9 +242,11 @@ const SummaryPage = () => {
                                     <div className="grid grid-cols-2 gap-4 mb-4">
                                         <div>
                                             <span className="text-gray-600 text-sm">Time Slot:</span>
-                                            <p className="font-medium">{room.timeSlot === 'full' ? 'Full Day (8:00 AM - 5:00 PM)' :
-                                                room.timeSlot === 'morning' ? 'Morning (8:00 AM - 12:00 PM)' :
-                                                    'Evening (1:00 PM - 5:00 PM)'}</p>
+                                            <p className="font-medium">
+                                                {room.timeSlot === 'full' ? 'Full Day (8:00 AM - 5:00 PM)' :
+                                                    room.timeSlot === 'morning' ? 'Morning (8:00 AM - 12:00 PM)' :
+                                                        'Evening (1:00 PM - 5:00 PM)'}
+                                            </p>
                                         </div>
                                         <div>
                                             <span className="text-gray-600 text-sm">Booking Type:</span>
@@ -309,7 +254,7 @@ const SummaryPage = () => {
                                         </div>
                                     </div>
 
-                                    {/* Selected Dates with Remove Option for Daily Bookings */}
+                                    {/* Selected Dates */}
                                     <div>
                                         <span className="text-gray-600 text-sm">Selected Dates:</span>
                                         <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -348,14 +293,14 @@ const SummaryPage = () => {
                                     <span>Tax (3.5%)</span>
                                     <span>${priceBreakdown.tax.toFixed(2)}</span>
                                 </div>
-                                <div className="flex justify-between items-center text-sm text-gray-600">
+                                <div className="flex justify-between items-center text-gray-600">
                                     <div>
                                         <span>Security Deposit</span>
-                                        <div className="text-xs text-gray-500">($250 one-time, refundable)</div>
+                                        <div className="text-xs text-gray-500">(Refundable)</div>
                                     </div>
                                     <span>${priceBreakdown.securityDeposit.toFixed(2)}</span>
                                 </div>
-                                <div className="border-t border-gray-200 pt-3 mt-3">
+                                <div className="border-t border-gray-200 pt-3">
                                     <div className="flex justify-between font-semibold">
                                         <span>Total</span>
                                         <span className="text-blue-600">${priceBreakdown.total.toFixed(2)}</span>
@@ -364,81 +309,26 @@ const SummaryPage = () => {
                             </div>
                         </div>
 
-                        {/* Payment Details Section */}
-                        <div className="border-t border-gray-200 pt-6 mb-8">
-                            <h2 className="text-xl font-semibold mb-4">Payment Details</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Cardholder Name
-                                    </label>
-                                    <input
-                                        type="text"
-                                        name="name"
-                                        value={cardDetails.name}
-                                        onChange={handleCardDetailsChange}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        placeholder="John Doe"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Card Number
-                                    </label>
-                                    <input
-                                        type="text"
-                                        name="cardNumber"
-                                        value={cardDetails.cardNumber}
-                                        onChange={handleCardDetailsChange}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        placeholder="1234 5678 9012 3456"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Expiry Date
-                                    </label>
-                                    <input
-                                        type="text"
-                                        name="expiryDate"
-                                        value={cardDetails.expiryDate}
-                                        onChange={handleCardDetailsChange}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        placeholder="MM/YY"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        CVV
-                                    </label>
-                                    <input
-                                        type="text"
-                                        name="cvv"
-                                        value={cardDetails.cvv}
-                                        onChange={handleCardDetailsChange}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        placeholder="123"
-                                        required
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Stripe Payment Button */}
-                        <div className="mt-8 border-t border-gray-200 pt-6">
+                        {/* Proceed to Payment Button */}
+                        <div className="mt-8">
                             <button
-                                onClick={() => router.push('/booking/payment')}
-                                className="w-full flex items-center justify-center py-4 px-6 rounded-lg text-white font-medium bg-[#635BFF] hover:bg-[#4B45C6] transition-colors duration-200"
+                                onClick={handleProceedToPayment}
+                                disabled={isProcessing}
+                                className={`w-full flex items-center justify-center py-4 px-6 rounded-lg text-white font-medium 
+                                    ${isProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'} 
+                                    transition-colors duration-200`}
                             >
-                                <svg className="w-8 h-8 mr-3" viewBox="0 0 60 25" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M60 12.5c0-6.904-5.596-12.5-12.5-12.5h-35C5.596 0 0 5.596 0 12.5S5.596 25 12.5 25h35C54.404 25 60 19.404 60 12.5z" fill="#fff" />
-                                    <path d="M59.5 12.5c0-6.628-5.372-12-12-12h-35c-6.628 0-12 5.372-12 12s5.372 12 12 12h35c6.628 0 12-5.372 12-12z" stroke="#E0E0E0" />
-                                </svg>
-                                <span className="text-lg">Pay securely with Stripe</span>
-                                <span className="ml-2 font-bold">${priceBreakdown.total.toFixed(2)}</span>
+                                {isProcessing ? (
+                                    <>
+                                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Processing...
+                                    </>
+                                ) : (
+                                    'Proceed to Payment'
+                                )}
                             </button>
                         </div>
                     </div>

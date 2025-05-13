@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import dbConnect from '@/lib/mongoose';
+import { Booking } from '@/models/Booking';
+import { User } from '@/models/User';
 
 interface BookingRoom {
     id: number;
@@ -23,8 +25,6 @@ interface BookingData {
 
 export async function POST(req: Request) {
     try {
-        // Connect to database and get user session
-        const { db } = await connectToDatabase();
         const session = await getServerSession(authOptions);
 
         if (!session?.user?.id) {
@@ -34,63 +34,38 @@ export async function POST(req: Request) {
             );
         }
 
-        const bookingData: BookingData = await req.json();
+        await dbConnect();
 
-        // Validate required fields
-        if (!bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount || !bookingData.paymentDetails) {
+        const bookingData = await req.json();
+
+        // Validate booking data
+        if (!bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount) {
             return NextResponse.json(
                 { error: 'Missing required booking information' },
                 { status: 400 }
             );
         }
 
-        // Check for existing bookings to avoid conflicts
-        for (const room of bookingData.rooms) {
-            const existingBookings = await db.collection('bookings').find({
-                roomId: room.id.toString(),
-                dates: { $in: room.dates },
-                timeSlot: room.timeSlot
-            }).toArray();
-
-            if (existingBookings.length > 0) {
-                return NextResponse.json(
-                    {
-                        error: 'Some dates are already booked for the selected rooms',
-                        conflictingDates: existingBookings.map(b => ({
-                            date: b.dates[0],
-                            roomId: b.roomId
-                        }))
-                    },
-                    { status: 409 }
-                );
-            }
-        }
-
-        // Create bookings for each room
-        const bookingPromises = bookingData.rooms.map(room => {
-            return db.collection('bookings').insertOne({
-                userId: session.user.id,
-                roomId: room.id.toString(),
-                dates: room.dates,
-                timeSlot: room.timeSlot,
-                status: 'confirmed',
-                totalAmount: bookingData.totalAmount,
-                paymentDetails: bookingData.paymentDetails,
-                createdAt: new Date(),
-                updatedAt: new Date()
-            });
+        // Create the booking
+        const booking = await Booking.create({
+            userId: session.user.id,
+            ...bookingData,
+            status: 'pending'
         });
 
-        const results = await Promise.all(bookingPromises);
+        // Update user's booking status
+        await User.findByIdAndUpdate(session.user.id, {
+            hasBookings: true
+        });
 
         return NextResponse.json({
-            message: 'Bookings created successfully',
-            bookingIds: results.map(r => r.insertedId.toString())
+            message: 'Booking created successfully',
+            bookingId: booking._id
         });
-    } catch (error) {
-        console.error('Error creating bookings:', error);
+    } catch (error: any) {
+        console.error('Error creating booking:', error);
         return NextResponse.json(
-            { error: 'Failed to create bookings' },
+            { error: error?.message || 'Failed to create booking' },
             { status: 500 }
         );
     }

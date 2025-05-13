@@ -27,7 +27,7 @@ interface PaymentResponse {
     bookingIds: string[];
 }
 
-const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => {
+const PaymentForm = ({ priceBreakdown, clientSecret }: { priceBreakdown: PriceBreakdown; clientSecret: string }) => {
     const stripe = useStripe();
     const elements = useElements();
     const router = useRouter();
@@ -42,43 +42,13 @@ const PaymentForm = ({ priceBreakdown }: { priceBreakdown: PriceBreakdown }) => 
         setError(null);
 
         try {
-            // Get booking data from localStorage
-            const bookingData = localStorage.getItem('bookingData');
-            if (!bookingData) {
-                throw new Error('No booking data found');
-            }
-
-            const parsedBookingData = JSON.parse(bookingData);
-
             // First, trigger form validation and submission
             const { error: submitError } = await elements.submit();
             if (submitError) {
                 throw new Error(submitError.message);
             }
 
-            // Create payment intent with booking data
-            const response = await fetch('/api/payment/intent', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    amount: priceBreakdown.total * 100, // Convert to cents
-                    bookingData: parsedBookingData
-                }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to create payment intent');
-            }
-
-            const { clientSecret, bookingIds } = await response.json() as PaymentResponse;
-
-            // Store booking IDs for confirmation
-            localStorage.setItem('pendingBookingIds', JSON.stringify(bookingIds));
-
-            // Confirm the payment
+            // Confirm the payment using the existing clientSecret
             const result = await stripe.confirmPayment({
                 elements,
                 clientSecret,
@@ -143,7 +113,9 @@ const PaymentPage = () => {
     useEffect(() => {
         // Get booking details from localStorage
         const bookingData = localStorage.getItem('bookingData');
-        if (!bookingData) {
+        const paymentIntent = localStorage.getItem('paymentIntent');
+
+        if (!bookingData || !paymentIntent) {
             toast.error('No booking details found');
             router.push('/booking');
             return;
@@ -151,6 +123,7 @@ const PaymentPage = () => {
 
         try {
             const parsedData = JSON.parse(bookingData);
+            const { clientSecret } = JSON.parse(paymentIntent);
 
             // Validate booking data
             if (!parsedData.rooms || !Array.isArray(parsedData.rooms) || parsedData.rooms.length === 0) {
@@ -168,52 +141,12 @@ const PaymentPage = () => {
                 total: parsedData.totalAmount
             });
 
-            // Create initial payment intent
-            console.log('Attempting to create payment intent with data:', {
-                amount: parsedData.totalAmount * 100,
-                rooms: parsedData.rooms.length,
-                bookingType: parsedData.bookingType
-            });
-
-            fetch('/api/payment/intent', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    amount: parsedData.totalAmount * 100, // Convert to cents
-                    bookingData: parsedData
-                }),
-            })
-                .then(async response => {
-                    console.log('Payment intent response status:', response.status);
-                    const data = await response.json();
-                    console.log('Payment intent response data:', data);
-
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Failed to initialize payment');
-                    }
-                    return data;
-                })
-                .then((data: PaymentResponse) => {
-                    console.log('Successfully created payment intent');
-                    setClientSecret(data.clientSecret);
-                    localStorage.setItem('pendingBookingIds', JSON.stringify(data.bookingIds));
-                    setError(null); // Clear any previous errors
-                })
-                .catch(error => {
-                    console.error('Detailed payment intent error:', {
-                        message: error.message,
-                        name: error.name,
-                        stack: error.stack
-                    });
-                    const errorMessage = error instanceof Error ? error.message : 'Failed to initialize payment';
-                    setError(errorMessage);
-                    toast.error(errorMessage);
-                });
+            // Set the client secret from localStorage
+            setClientSecret(clientSecret);
         } catch (error) {
             console.error('Error processing booking data:', error);
             const errorMessage = error instanceof Error ? error.message : 'Invalid booking data';
+            setError(errorMessage);
             toast.error(errorMessage);
             router.push('/booking');
         }
@@ -286,7 +219,7 @@ const PaymentPage = () => {
                         {/* Stripe Payment Form */}
                         {clientSecret ? (
                             <Elements stripe={stripePromise} options={{ clientSecret }}>
-                                <PaymentForm priceBreakdown={priceBreakdown} />
+                                <PaymentForm priceBreakdown={priceBreakdown} clientSecret={clientSecret} />
                             </Elements>
                         ) : error ? (
                             <div className="text-center py-4">

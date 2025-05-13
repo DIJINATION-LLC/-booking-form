@@ -1,5 +1,4 @@
-import { MongoClient, MongoClientOptions } from 'mongodb';
-import { cache } from 'react';
+import { MongoClient } from 'mongodb';
 
 if (!process.env.MONGODB_URI) {
     throw new Error('Please define the MONGODB_URI environment variable inside .env.local');
@@ -16,7 +15,7 @@ if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
     }
 }
 
-const options: MongoClientOptions = {
+const options = {
     maxPoolSize: 10,
     minPoolSize: 5,
     maxIdleTimeMS: 30000,
@@ -24,44 +23,27 @@ const options: MongoClientOptions = {
     serverSelectionTimeoutMS: 30000,
     socketTimeoutMS: 30000,
     waitQueueTimeoutMS: 30000,
-    retryWrites: true,
-    retryReads: true
 };
 
-declare global {
-    var _mongoClientPromise: Promise<MongoClient> | undefined;
-}
-
+let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
 
 if (process.env.NODE_ENV === 'development') {
     // In development mode, use a global variable so that the value
     // is preserved across module reloads caused by HMR (Hot Module Replacement).
-    if (!global._mongoClientPromise) {
-        const client = new MongoClient(uri, options);
-        global._mongoClientPromise = client.connect()
-            .then(client => {
-                console.log('Successfully connected to MongoDB');
-                return client;
-            })
-            .catch(error => {
-                console.error('Failed to connect to MongoDB:', error);
-                throw error;
-            });
+    let globalWithMongo = global as typeof globalThis & {
+        _mongoClientPromise?: Promise<MongoClient>;
+    };
+
+    if (!globalWithMongo._mongoClientPromise) {
+        client = new MongoClient(uri, options);
+        globalWithMongo._mongoClientPromise = client.connect();
     }
-    clientPromise = global._mongoClientPromise;
+    clientPromise = globalWithMongo._mongoClientPromise;
 } else {
     // In production mode, it's best to not use a global variable.
-    const client = new MongoClient(uri, options);
-    clientPromise = client.connect()
-        .then(client => {
-            console.log('Successfully connected to MongoDB');
-            return client;
-        })
-        .catch(error => {
-            console.error('Failed to connect to MongoDB:', error);
-            throw error;
-        });
+    client = new MongoClient(uri, options);
+    clientPromise = client.connect();
 }
 
 // Export a module-scoped MongoClient promise. By doing this in a
@@ -69,7 +51,7 @@ if (process.env.NODE_ENV === 'development') {
 export default clientPromise;
 
 // Cached database connection with retry mechanism
-export const connectToDatabase = cache(async () => {
+export const connectToDatabase = async () => {
     let retries = 3;
     let lastError;
 
@@ -98,4 +80,4 @@ export const connectToDatabase = cache(async () => {
 
     console.error('All database connection attempts failed');
     throw lastError || new Error('Failed to establish database connection after multiple attempts');
-});
+};

@@ -1,52 +1,83 @@
-import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getToken } from 'next-auth/jwt';
+
+// List of public paths that don't require authentication
+const publicPaths = [
+    '/',
+    '/login',
+    '/register',
+    '/api/auth',
+    '/api/test-setup',
+    '/api/test-connection',
+    '/favicon.ico',
+    '/_next'
+];
+
+// List of protected API routes that should return 401 instead of redirecting
+const protectedApiRoutes = [
+    '/api/bookings',
+    '/api/rooms',
+    '/api/payment'
+];
 
 export async function middleware(request: NextRequest) {
-    const token = await getToken({
-        req: request,
-        secret: process.env.NEXTAUTH_SECRET
-    });
+    const { pathname } = request.nextUrl;
 
-    // Define public paths that don't require authentication
-    const publicPaths = ['/', '/login', '/register', '/api/test-db', '/api/test-user'];
-    const isPublicPath = publicPaths.includes(request.nextUrl.pathname);
-    const isApiAuthPath = request.nextUrl.pathname.startsWith('/api/auth/');
-    const isApiPath = request.nextUrl.pathname.startsWith('/api/');
-
-    // Allow public paths and auth API routes
-    if (isPublicPath || isApiAuthPath) {
-        if (token && isPublicPath && request.nextUrl.pathname !== '/') {
-            // If user is already logged in and tries to access public pages,
-            // redirect to booking page
-            return NextResponse.redirect(new URL('/booking', request.url));
-        }
+    // Check if the path is public
+    if (publicPaths.some(path => pathname.startsWith(path))) {
         return NextResponse.next();
     }
 
-    // For API routes, check for token
-    if (isApiPath && !token) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    try {
+        // Verify authentication
+        const token = await getToken({
+            req: request,
+            secret: process.env.NEXTAUTH_SECRET,
+            secureCookie: process.env.NODE_ENV === 'production',
+        });
 
-    // Protect all other routes
-    if (!token) {
-        const url = new URL('/login', request.url);
-        url.searchParams.set('callbackUrl', request.nextUrl.pathname);
-        return NextResponse.redirect(url);
-    }
+        // If authenticated, proceed
+        if (token) {
+            const requestHeaders = new Headers(request.headers);
+            requestHeaders.set('x-user-id', token.id as string);
 
-    return NextResponse.next();
+            const response = NextResponse.next({
+                request: {
+                    headers: requestHeaders,
+                }
+            });
+
+            return response;
+        }
+
+        // Handle unauthenticated requests
+        if (protectedApiRoutes.some(route => pathname.startsWith(route))) {
+            // Return 401 for API routes
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Redirect to login for page routes
+        const loginUrl = new URL('/login', request.url);
+        loginUrl.searchParams.set('callbackUrl', pathname);
+        return NextResponse.redirect(loginUrl);
+
+    } catch (error) {
+        console.error('Middleware error:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
 }
 
+// Configure which routes to run middleware on
 export const config = {
     matcher: [
         /*
-         * Match all request paths except for the ones starting with:
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - favicon.ico (favicon file)
+         * Match all request paths except:
+         * 1. _next/static (static files)
+         * 2. _next/image (image optimization files)
+         * 3. favicon.ico (favicon file)
+         * 4. public folder
          */
-        '/((?!_next/static|_next/image|favicon.ico).*)',
+        '/((?!_next/static|_next/image|public/).*)',
     ],
 }; 

@@ -38,7 +38,7 @@ export default function Register() {
         }
 
         try {
-            const response = await fetch('/api/register', {
+            const response = await fetch('/api/auth/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -55,12 +55,12 @@ export default function Register() {
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.message || 'Registration failed');
+                throw new Error(data.error || 'Registration failed');
             }
 
             // Registration successful
             toast.success('Registration successful! Please log in.');
-            router.push('/'); // Redirect to login page
+            router.push('/login');
         } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Registration failed');
         } finally {
@@ -135,7 +135,11 @@ export default function Register() {
                                 value={formData.password}
                                 onChange={handleChange}
                                 required
+                                minLength={8}
                             />
+                            <p className="mt-1 text-sm text-gray-500">
+                                Password must be at least 8 characters long
+                            </p>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
@@ -147,14 +151,14 @@ export default function Register() {
                                 value={formData.confirmPassword}
                                 onChange={handleChange}
                                 required
+                                minLength={8}
                             />
                         </div>
                         <button
                             type="submit"
                             disabled={loading}
-                            className={`w-full py-3 px-4 rounded-lg text-white text-lg font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 ${
-                                loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                            }`}
+                            className={`w-full py-3 px-4 rounded-lg text-white text-lg font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                                }`}
                         >
                             {loading ? (
                                 <div className="flex items-center justify-center">

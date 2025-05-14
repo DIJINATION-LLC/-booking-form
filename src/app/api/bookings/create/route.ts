@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { ObjectId } from 'mongodb';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import dbConnect from '@/lib/mongoose';
+import { Booking } from '@/models/Booking';
+import { User } from '@/models/User';
 
 interface BookingRoom {
     id: number;
@@ -8,76 +11,61 @@ interface BookingRoom {
     dates: string[];
 }
 
+interface PaymentDetails {
+    cardLast4: string;
+    cardholderName: string;
+}
+
 interface BookingData {
-    userId: string;
     rooms: BookingRoom[];
-    bookingType: 'daily' | 'monthly';
+    bookingType: string;
     totalAmount: number;
+    paymentDetails: PaymentDetails;
 }
 
 export async function POST(req: Request) {
     try {
-        const { db } = await connectToDatabase();
-        const bookingData: BookingData = await req.json();
+        const session = await getServerSession(authOptions);
 
-        // Validate required fields
-        if (!bookingData.userId || !bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount) {
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: 'Unauthorized' },
+                { status: 401 }
+            );
+        }
+
+        await dbConnect();
+
+        const bookingData = await req.json();
+
+        // Validate booking data
+        if (!bookingData.rooms || !bookingData.bookingType || !bookingData.totalAmount) {
             return NextResponse.json(
                 { error: 'Missing required booking information' },
                 { status: 400 }
             );
         }
 
-        // Check for existing bookings to avoid conflicts
-        const existingBookings = await db.collection('bookings').find({
-            $or: bookingData.rooms.map((room: BookingRoom) => ({
-                roomId: room.id.toString(),
-                date: { $in: room.dates.map((date: string) => new Date(date)) },
-                timeSlot: room.timeSlot
-            }))
-        }).toArray();
+        // Create the booking
+        const booking = await Booking.create({
+            userId: session.user.id,
+            ...bookingData,
+            status: 'pending'
+        });
 
-        if (existingBookings.length > 0) {
-            return NextResponse.json(
-                { error: 'Some dates are already booked for the selected rooms' },
-                { status: 409 }
-            );
-        }
-
-        // Create booking records for each room and its dates
-        const bookingRecords = bookingData.rooms.flatMap((room: BookingRoom) =>
-            room.dates.map((date: string) => ({
-                userId: bookingData.userId,
-                roomId: room.id.toString(),
-                date: new Date(date),
-                timeSlot: room.timeSlot,
-                bookingType: bookingData.bookingType,
-                amount: bookingData.totalAmount / bookingData.rooms.reduce((total: number, r: BookingRoom) => total + r.dates.length, 0),
-                createdAt: new Date()
-            }))
-        );
-
-        const result = await db.collection('bookings').insertMany(bookingRecords);
-
-        // Update user record with booking status
-        await db.collection('users').updateOne(
-            { _id: new ObjectId(bookingData.userId) },
-            {
-                $set: {
-                    hasBookings: true
-                }
-            }
-        );
+        // Update user's booking status
+        await User.findByIdAndUpdate(session.user.id, {
+            hasBookings: true
+        });
 
         return NextResponse.json({
-            success: true,
-            bookingIds: result.insertedIds,
-            message: 'Booking created successfully'
+            message: 'Booking created successfully',
+            bookingId: booking._id
         });
-    } catch (error) {
-        console.error('Failed to create booking:', error);
+    } catch (error: any) {
+        console.error('Error creating booking:', error);
         return NextResponse.json(
-            { error: 'Failed to create booking' },
+            { error: error?.message || 'Failed to create booking' },
             { status: 500 }
         );
     }

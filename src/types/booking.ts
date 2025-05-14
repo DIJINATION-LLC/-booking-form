@@ -36,7 +36,7 @@ export const PRICING = {
     },
     monthly: {
         full: 2000,
-        half: 1000
+        half: 1200
     },
     tax: 0.035, // 3.5%
     securityDeposit: 500
